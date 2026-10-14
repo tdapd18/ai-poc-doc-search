@@ -1,0 +1,35 @@
+{
+  "notice": "가상 사용자입니다. 실제 회사 인증 시스템(SSO/AD)과 무관한 교육용 시연 전환 기능이며, 실제 운영에서는 사내 SSO·AD·시스템별 ACL 연동이 필요합니다.",
+  "users": [
+    {
+      "user_id": "u_actuary",
+      "name": "박계리 (계리평가팀)",
+      "department": "계리평가팀",
+      "role": "member",
+      "groups": [
+        "actuarial",
+        "all_staff"
+      ]
+    },
+    {
+      "user_id": "u_finance",
+      "name": "최재무 (재무팀)",
+      "department": "재무팀",
+      "role": "member",
+      "groups": [
+        "finance",
+        "all_staff"
+      ]
+    },
+    {
+      "user_id": "u_admin",
+      "name": "관리자 (시스템 관리)",
+      "department": "정보관리",
+      "role": "admin",
+      "groups": [
+        "admin",
+        "all_staff"
+      ]
+    }
+  ]
+}
