@@ -14,7 +14,7 @@
 ## 폴더 구조
 
 ```text
-actuarial_ai_search/
+ai-poc-doc-search/   (저장소 루트)
 ├── app.py                 # Streamlit 3단 화면 (왼쪽: 자료·범위 / 가운데: 검색 / 오른쪽: 근거 문서)
 ├── conftest.py, pytest.ini
 ├── requirements.txt, .env.example
@@ -54,8 +54,8 @@ actuarial_ai_search/
 Python 3.10 이상이 필요합니다. 저장소 루트(`ai-poc-doc-search`)에서 시작합니다.
 
 ```powershell
-# 1) 프로젝트 폴더로 이동
-cd actuarial_ai_search
+# 1) 저장소 루트로 이동 (이미 루트라면 생략)
+cd ai-poc-doc-search
 
 # 2) 가상환경 생성 및 활성화
 py -3 -m venv .venv
