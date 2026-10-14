@@ -1,0 +1,4 @@
+﻿code,pattern,severity,cause,check_steps
+E101,INPUT_FILE_NOT_FOUND,높음,입력 파일 경로 또는 파일명 불일치 가능성,파일 존재 확인 > 경로·파일명 확인 > 파일 접근권한 확인
+E207,COLUMN_MISMATCH,중간,입력 CSV의 열 이름이 기대 스키마와 다름,필수 컬럼명 확인 > 헤더 오탈자 확인 > 입력 스키마 비교
+E320,MODEL_DATE_INCONSISTENT,낮음,입력 기준월과 모델 실행 기준월이 다를 가능성,입력 기준월 확인 > 실행 기준월 확인 > 기준월 정합성 점검

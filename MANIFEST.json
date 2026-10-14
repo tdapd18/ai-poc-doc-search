@@ -1,0 +1,157 @@
+{
+  "package": "AI 심화교육 Claude Code 즉시착수키트",
+  "revision": "2026-10-13",
+  "tests": "core Python tests 16/16 pass; browser unverified",
+  "files": [
+    {
+      "path": "DECISIONS.md",
+      "bytes": 5481,
+      "sha256": "98c8000a39476ced948b969522d17e8fa54d3cc5df0613f0e0e66f7c34d350da"
+    },
+    {
+      "path": "DEMO_SCRIPT.md",
+      "bytes": 2025,
+      "sha256": "2dfd00639be269ef97c982fe5f39efdee213b162bc72574ced21473d800ce89a"
+    },
+    {
+      "path": "START_HERE.md",
+      "bytes": 4164,
+      "sha256": "0b40b5d0a052a8723c3f6960b4165416d003b0c174d644009239d64f7e87ad7b"
+    },
+    {
+      "path": "TEST_REPORT.txt",
+      "bytes": 878,
+      "sha256": "d479b49a3e46b818a1447aa9beef0803580eb35642e96c24bc7f6701a93c4928"
+    },
+    {
+      "path": "app_1.py",
+      "bytes": 3186,
+      "sha256": "34dd2e3fe382d33aa67d1a3504460ab17d99f612dee52f521a6172937ba9ce22"
+    },
+    {
+      "path": "app_2.py",
+      "bytes": 2581,
+      "sha256": "bc1e6bd16504e81e2a74d5fbc21ab5f4215900597b4f4e0e28d99d2258bac077"
+    },
+    {
+      "path": "app_3.py",
+      "bytes": 1676,
+      "sha256": "6b3f5cb17dd380a7e69104f5f32ee33349176c04112397aff2ca7fd85f23cff3"
+    },
+    {
+      "path": "data/1안_가상_결산.csv",
+      "bytes": 532,
+      "sha256": "81c5be387f5ab86f8469870886fd64e19ddb90e72c0965a2c46e04289badcafd"
+    },
+    {
+      "path": "data/1안_가상_사유코드사전.csv",
+      "bytes": 233,
+      "sha256": "31bb8305f7d980666baf4fb13dc078c7f7a3455b7dd720d0531597c6b77fa42c"
+    },
+    {
+      "path": "data/1안_신규소멸_테스트.csv",
+      "bytes": 141,
+      "sha256": "6a70bb460f5ea81f47366c44e88426ac640d538fd29e69cbf6e6327fdc60d856"
+    },
+    {
+      "path": "data/1안_컬럼누락_오류테스트.csv",
+      "bytes": 120,
+      "sha256": "b3bd7127b8556a5a65bc19930a8282ed8f791be144cf812156281df0591dc864"
+    },
+    {
+      "path": "data/2안_가상_실행.log",
+      "bytes": 451,
+      "sha256": "d420ddc75bf103bf6961a0da8b679d1a879fb9ca0a6cc4d08d49c92bced9ff6c"
+    },
+    {
+      "path": "data/2안_빈실행_오류테스트.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "data/2안_오류사전.csv",
+      "bytes": 553,
+      "sha256": "aa09c3242b76c7d9dba60e0fc61f3cfffc44197ce7c8200b55d6c9a5aaed4559"
+    },
+    {
+      "path": "data/3안_가상문서/3안_IFRS17_결산분석_가상.md",
+      "bytes": 817,
+      "sha256": "bd18b32d5424e47d861a31798c497d7d2903c793fdb659c5a1ce6a3d3f2fe508"
+    },
+    {
+      "path": "data/3안_가상문서/3안_RAFM_오류점검_가상.md",
+      "bytes": 890,
+      "sha256": "2c14080560d5fc5719dc145ada18d4f68f7c7d00ec17e5b42ef6985077dae658"
+    },
+    {
+      "path": "data/3안_가상문서/3안_결산체크리스트_가상.md",
+      "bytes": 663,
+      "sha256": "57b44e7d318a988ebd2992839144f7b74cd06fd8f60ddafab214d0105fdf35a1"
+    },
+    {
+      "path": "data/3안_가상문서/3안_문서운영_가상.md",
+      "bytes": 627,
+      "sha256": "786191a7225d3b80944d2583210228321df785869f4ba6b10e4c72e8ccc8ff33"
+    },
+    {
+      "path": "docs/AI_심화교육_ClaudeCode_내일착수_검증보강_최종.xlsx",
+      "bytes": 58251,
+      "sha256": "93d86a901ed90caeb190315dfdeb7dd90f9b97dd7f628150952b7abd77877ba5"
+    },
+    {
+      "path": "preflight.py",
+      "bytes": 1158,
+      "sha256": "7e2db0326237645f5cb948b500930e67e56d924913be735277c50fa9795c6468"
+    },
+    {
+      "path": "prompts/01_결산증감_ClaudeCode.md",
+      "bytes": 2928,
+      "sha256": "afdc97d602ddccdd5da83daec3cdeaf118042956e196ef80d48df0a77db05b71"
+    },
+    {
+      "path": "prompts/02_RAFM오류진단_ClaudeCode.md",
+      "bytes": 2444,
+      "sha256": "35ab05051e8ddce911867a185ea8f76d7da05cbbeded082a4762221af331618d"
+    },
+    {
+      "path": "prompts/03_문서검색_ClaudeCode.md",
+      "bytes": 2223,
+      "sha256": "c97aa860d9d8e510c9bd5079fb7980a15f3f948a139506f666ed659434dae419"
+    },
+    {
+      "path": "reference/__init__.py",
+      "bytes": 81,
+      "sha256": "76c019aeddaa50cdd94d2d99a8a79e87b222cd94afbcd618e28ca02160cd494c"
+    },
+    {
+      "path": "reference/common.py",
+      "bytes": 1022,
+      "sha256": "818454800e751b78f98d22c4d48c4cad83f1712423d5de5cb2582fadc3fe8756"
+    },
+    {
+      "path": "reference/core_1.py",
+      "bytes": 4109,
+      "sha256": "64c286e86de997f49d583b9cf411aa0265c02386777946565a14be9ade7bf74a"
+    },
+    {
+      "path": "reference/core_2.py",
+      "bytes": 3104,
+      "sha256": "744c0da86370c9e4d8fc26adc64ab26627a2ec6860d770f8596a3f07f112c0c9"
+    },
+    {
+      "path": "reference/core_3.py",
+      "bytes": 3623,
+      "sha256": "2d24803f20b92e32a348f2733dff751a5d3728e9b088cb8973ccd7a72677d5f3"
+    },
+    {
+      "path": "requirements.txt",
+      "bytes": 19,
+      "sha256": "b93868016bf5e52d371b3b05a08cd51b4bd7d6cadddd670e5e56733f5b6eea68"
+    },
+    {
+      "path": "tests/test_core.py",
+      "bytes": 4382,
+      "sha256": "6b0bd1c5ef9a7cc6517abb4c25df991c811cf9db5f8151bc4c05e80ad277f1ec"
+    }
+  ]
+}

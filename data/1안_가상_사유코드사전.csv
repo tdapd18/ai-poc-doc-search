@@ -1,0 +1,5 @@
+﻿reason_code,display_name,notes
+RATE,가상 가정변경,계리 판단 아님
+SURRENDER,가상 해약영향,계리 판단 아님
+NEW,가상 신규영향,계리 판단 아님
+ASSUMPTION,가상 추정변경,계리 판단 아님
