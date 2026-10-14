@@ -38,6 +38,12 @@ class SourceSyncResult:
     unchanged: int = 0
     invalid: list[InvalidItem] = field(default_factory=list)
     duplicates: list[str] = field(default_factory=list)
+    denied: int = 0  # 읽기 권한이 없어 색인하지 않은(또는 색인에서 제거한) 파일·폴더 수
+    retained: int = 0  # 일시 오류·공유 불가·부분 수집으로 삭제 판단을 보류하고 기존 색인을 유지한 문서 수
+    skipped: dict[str, int] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
+    unavailable_shares: list[str] = field(default_factory=list)
+    scanned: int = 0
 
     @property
     def changed(self) -> bool:
@@ -72,6 +78,16 @@ class SyncReport:
             if s.invalid:
                 lines.append(f"  ⚠ 형식 오류/중복으로 제외 {len(s.invalid)}건: "
                              + "; ".join(f"{i.path} ({i.reason})" for i in s.invalid))
+            if s.denied:
+                lines.append(f"  🔒 읽기 권한이 없어 색인하지 않은 항목 {s.denied}건 (이 Windows 계정 기준)")
+            for reason, n in sorted(s.skipped.items()):
+                lines.append(f"  · {reason}: {n}건")
+            if s.retained:
+                lines.append(f"  ⏳ 확인하지 못해 기존 색인을 유지한 문서 {s.retained}건 (조회 시 원본 접근을 다시 확인하며, 접근할 수 없으면 숨겨집니다)")
+            for sh in s.unavailable_shares:
+                lines.append(f"  ⚠ 공유 '{sh}' 에 연결할 수 없어 이번 갱신에서 제외했습니다")
+            for w in dict.fromkeys(s.warnings):
+                lines.append(f"  ℹ {w}")
         return lines
 
 
@@ -80,9 +96,12 @@ class SyncManager:
         self.indexer = indexer
         self.connectors = connectors
 
-    def sync(self) -> SyncReport:
+    def sync(self, progress=None) -> SyncReport:
+        """progress: 진행 상황 콜백(dict: share/files/documents/done). 커넥터가 지원할 때만 호출된다."""
         report = SyncReport()
         for conn in self.connectors:
+            if hasattr(conn, "progress"):
+                conn.progress = progress
             report.sources.append(self._sync_one(conn))
         log_event(_log, "sync", sources=len(report.sources), failed=len(report.failed_sources),
                   changed=report.changed)
@@ -90,8 +109,9 @@ class SyncManager:
 
     def _sync_one(self, conn: BaseConnector) -> SourceSyncResult:
         res = SourceSyncResult(conn.source_key, conn.source_label)
+        before = self.indexer.snapshot(conn.source_key)
         try:
-            fetched = conn.fetch_all()
+            fetched = conn.fetch_incremental(before) if hasattr(conn, "fetch_incremental") else conn.fetch_all()
         except ConnectorError as exc:
             return self._fail(conn, res, str(exc))
         except Exception as exc:  # 어떤 Connector 오류도 다른 저장소에 전파하지 않는다. 메시지 원문은 기록하지 않음.
@@ -99,10 +119,16 @@ class SyncManager:
 
         res.invalid = list(fetched.invalid)
         res.duplicates = list(fetched.duplicates)
-        before = self.indexer.snapshot(conn.source_key)
+        res.denied, res.skipped, res.warnings = fetched.denied, dict(fetched.skipped), list(fetched.warnings)
+        res.unavailable_shares, res.scanned = list(fetched.unavailable_shares), fetched.scanned
 
         upserts: list[Document] = []
-        current_ids: set[str] = set()
+        current_ids: set[str] = set(fetched.unchanged_ids)
+        res.unchanged += len(fetched.unchanged_ids)
+        # 삭제 판단 보류: 일시 오류로 확인하지 못한 문서, 접근 불가/부분 수집 공유의 문서는 기존 색인을 유지한다
+        keep = set(fetched.retained_ids) | {d for d, row in before.items() if row.get("share") in fetched.no_delete_shares}
+        res.retained = len(keep - fetched.unchanged_ids)
+        current_ids |= keep
         for doc in fetched.documents:
             owner = self.indexer.owner_of(doc.doc_id)
             if owner and owner != conn.source_key:  # 다른 저장소가 이미 사용 중인 ID
@@ -124,6 +150,8 @@ class SyncManager:
                     res.acl_changed.append(doc.doc_id)
                 if not (content_changed or acl_changed or prev["version"] != doc.version):
                     res.unchanged += 1
+                    if doc.fingerprint and prev.get("fingerprint") != doc.fingerprint:
+                        upserts.append(doc)  # 내용은 같고 수정 시각만 바뀜: 지문만 조용히 갱신
                     continue
             upserts.append(doc)
 

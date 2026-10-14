@@ -45,7 +45,7 @@ def revalidate_history(entries: list[HistoryEntry], user: User | None, indexer: 
         ok = True
         for doc_id, _title, chash in e.sources:
             doc = indexer.get_document(doc_id)
-            if doc is None or not access.can_access(user, doc) or indexer.content_hash_of(doc_id) != chash:
+            if doc is None or not access.verify(user, doc) or indexer.content_hash_of(doc_id) != chash:
                 ok = False
                 break
         shown.append(DisplayEntry(e, hidden=not ok, source_titles=[t for _, t, _ in e.sources] if ok else []))

@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
@@ -19,7 +20,7 @@ from pathlib import Path
 from core.document_parser import detect_injection, split_chunks
 from core.models import Chunk, Document
 
-SCHEMA_VERSION = "3"  # 색인은 원본에서 다시 만들 수 있는 파생 데이터이므로, 버전이 다르면 비우고 다시 만든다.
+SCHEMA_VERSION = "4"  # 색인은 원본에서 다시 만들 수 있는 파생 데이터이므로, 버전이 다르면 비우고 다시 만든다.
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -30,6 +31,7 @@ CREATE TABLE IF NOT EXISTS documents (
     attachments_json TEXT NOT NULL DEFAULT '[]', allowed_users_json TEXT NOT NULL DEFAULT '[]',
     allowed_groups_json TEXT NOT NULL DEFAULT '[]', body TEXT NOT NULL,
     file_type TEXT NOT NULL DEFAULT 'md', file_name TEXT NOT NULL DEFAULT '', share TEXT NOT NULL DEFAULT '',
+    fingerprint TEXT NOT NULL DEFAULT '', index_level TEXT NOT NULL DEFAULT 'full', size_bytes INTEGER NOT NULL DEFAULT 0,
     content_hash TEXT NOT NULL, acl_hash TEXT NOT NULL, indexed_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS chunks (
@@ -54,12 +56,15 @@ class Indexer:
         self.db_path = Path(db_path)
         if str(self.db_path) != ":memory:":
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            new_file = not self.db_path.exists()
         self._memory_conn = sqlite3.connect(":memory:") if str(self.db_path) == ":memory:" else None
         with self._conn() as c:
             self._migrate(c)
             c.executescript(_SCHEMA)
             c.execute("INSERT OR IGNORE INTO meta(key, value) VALUES('index_generation', '0')")
             c.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?)", (SCHEMA_VERSION,))
+        if str(self.db_path) != ":memory:" and new_file and os.name == "posix":
+            os.chmod(self.db_path, 0o600)  # 개인 색인 파일: 본인만 읽기/쓰기 (Windows 는 사용자 프로필 ACL 에 의존)
 
     @staticmethod
     def _migrate(c: sqlite3.Connection) -> None:
@@ -77,6 +82,7 @@ class Indexer:
         conn = self._memory_conn or sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA secure_delete = ON")  # 삭제된 행의 내용을 파일에 남기지 않고 덮어쓴다
         try:
             yield conn
             conn.commit()
@@ -100,7 +106,8 @@ class Indexer:
     def snapshot(self, source_key: str) -> dict[str, dict]:
         with self._conn() as c:
             rows = c.execute(
-                "SELECT doc_id, version, content_hash, acl_hash FROM documents WHERE source_key=?", (source_key,)
+                "SELECT doc_id, version, content_hash, acl_hash, fingerprint, index_level, share, location FROM documents "
+                "WHERE source_key=?", (source_key,)
             ).fetchall()
         return {r["doc_id"]: dict(r) for r in rows}
 
@@ -121,14 +128,16 @@ class Indexer:
                 c.execute(
                     "INSERT INTO documents (doc_id, title, source_key, source_system, category, version, created_at,"
                     " modified_at, department, location, location_detail, attachments_json, allowed_users_json,"
-                    " allowed_groups_json, body, file_type, file_name, share, content_hash, acl_hash, indexed_at)"
-                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    " allowed_groups_json, body, file_type, file_name, share, fingerprint, index_level, size_bytes,"
+                    " content_hash, acl_hash, indexed_at)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (d.doc_id, d.title, d.source_key, d.source_system, d.category, d.version, d.created_at,
                      d.modified_at, d.department, d.location, d.location_detail,
                      json.dumps(list(d.attachments), ensure_ascii=False),
                      json.dumps(list(d.allowed_users), ensure_ascii=False),
                      json.dumps(list(d.allowed_groups), ensure_ascii=False),
-                     d.body, d.file_type, d.file_name, d.share, d.content_hash(), d.acl_hash(), _now()),
+                     d.body, d.file_type, d.file_name, d.share, d.fingerprint, d.index_level, d.size_bytes,
+                     d.content_hash(), d.acl_hash(), _now()),
                 )
                 for seq, (heading, loc, text) in enumerate(self._segments(d)):
                     reason = detect_injection(text)
@@ -141,6 +150,8 @@ class Indexer:
     @staticmethod
     def _segments(d: Document) -> list[tuple[str, str, str]]:
         """형식별 위치가 보존된 조각(segments)을 우선 사용하고, 없으면 본문을 문단으로 나눈다."""
+        if d.index_level == "metadata":
+            return []  # 메타데이터 전용: 본문 조각을 만들지 않는다
         if d.segments:
             return [(h, loc or f"§ {h}", t) for h, loc, t in d.segments]
         return [(c.heading, c.loc or f"§ {c.heading}", c.text) for c in split_chunks(d.title, d.body)]
@@ -175,7 +186,8 @@ class Indexer:
             allowed_users=tuple(json.loads(r["allowed_users_json"])),
             allowed_groups=tuple(json.loads(r["allowed_groups_json"])),
             location_detail=r["location_detail"], attachments=tuple(json.loads(r["attachments_json"])),
-            file_type=r["file_type"], file_name=r["file_name"], share=r["share"],
+            file_type=r["file_type"], file_name=r["file_name"], share=r["share"], fingerprint=r["fingerprint"],
+            index_level=r["index_level"], size_bytes=r["size_bytes"],
         )
 
     def get_document(self, doc_id: str) -> Document | None:
@@ -205,3 +217,43 @@ class Indexer:
     def count_documents(self) -> int:
         with self._conn() as c:
             return c.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+
+    # -- 보안: 소유 계정 / 초기화 / 삭제 내용 정리 ------------------------------
+    def get_owner(self) -> str:
+        with self._conn() as c:
+            row = c.execute("SELECT value FROM meta WHERE key='owner_identity'").fetchone()
+        return row[0] if row else ""
+
+    def set_owner(self, identity_key: str) -> None:
+        with self._conn() as c:
+            c.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('owner_identity', ?)", (identity_key,))
+
+    def ensure_owner(self, identity_key: str) -> bool:
+        """색인 소유 계정이 현재 계정과 다르면 색인을 비우고 소유자를 바꾼다. 비웠으면 True."""
+        owner = self.get_owner()
+        if owner and owner != identity_key:
+            self.reset()
+            self.set_owner(identity_key)
+            return True
+        if not owner:
+            self.set_owner(identity_key)
+        return False
+
+    def reset(self) -> None:
+        """모든 문서·조각·저장소 상태를 삭제하고 파일을 정리(VACUUM)한다. 모드 전환·소유 계정 변경 시 사용."""
+        with self._conn() as c:
+            c.execute("DELETE FROM chunks")
+            c.execute("DELETE FROM documents")
+            c.execute("DELETE FROM source_status")
+            self._bump(c)
+        self.vacuum()
+
+    def vacuum(self) -> None:
+        if self._memory_conn is not None:
+            return
+        conn = sqlite3.connect(self.db_path, isolation_level=None)
+        try:
+            conn.execute("PRAGMA secure_delete = ON")
+            conn.execute("VACUUM")
+        finally:
+            conn.close()

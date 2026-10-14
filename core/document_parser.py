@@ -75,7 +75,7 @@ def _as_tuple(value) -> tuple[str, ...]:
 
 
 def to_common_document(meta: dict, body: str, *, source_key: str, source_system: str,
-                       segments: tuple = ()) -> Document:
+                       segments: tuple = (), allow_empty_body: bool = False) -> Document:
     """저장소별 원본 구조에서 추출한 공통 필드(dict)를 ``Document`` 로 변환·검증한다."""
     for name in REQUIRED_FIELDS:
         value = meta.get(name)
@@ -84,7 +84,7 @@ def to_common_document(meta: dict, body: str, *, source_key: str, source_system:
     doc_id = str(meta["doc_id"]).strip()
     if not _ID_RE.match(doc_id):
         raise InvalidDocumentError("doc_id 형식 오류")
-    if not body or not body.strip():
+    if not allow_empty_body and (not body or not body.strip()):
         raise InvalidDocumentError("본문이 비어 있습니다")
     if len(body) > MAX_BODY_CHARS:
         raise InvalidDocumentError("본문 크기 제한 초과")
@@ -111,6 +111,9 @@ def to_common_document(meta: dict, body: str, *, source_key: str, source_system:
         file_name=str(meta.get("file_name", "")).strip(),
         share=str(meta.get("share", "")).strip(),
         segments=tuple(segments),
+        fingerprint=str(meta.get("fingerprint", "")),
+        index_level=str(meta.get("index_level", "full")),
+        size_bytes=int(meta.get("size_bytes", 0) or 0),
     )
 
 

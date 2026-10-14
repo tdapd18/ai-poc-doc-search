@@ -72,8 +72,8 @@ class AnswerGenerator:
         cites: list[Citation] = []
         for r in response.results:
             doc = self.indexer.get_document(r.doc_id)
-            if doc is None or not self.access.can_access(user, doc):
-                continue  # 검색 이후 삭제/권한 회수
+            if doc is None or not self.access.verify(user, doc):
+                continue  # 검색 이후 삭제/권한 회수 — 생성 직전 OS 재검증
             if self.indexer.content_hash_of(doc.doc_id) != r.content_hash:
                 continue  # 검색 이후 내용 변경 → 오래된 근거 사용 금지
             for p in r.passages:

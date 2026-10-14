@@ -116,3 +116,36 @@ def app(tmp_path, monkeypatch):
     at = AppTest.from_file(str(PROJECT / "app.py"), default_timeout=60).run()
     assert not at.exception
     return at, data
+
+
+# ---------------------------------------------------------------- 실제 Windows 모드(합성 공유) 픽스처
+@pytest.fixture
+def win(tmp_path):
+    import sys
+    sys.path.insert(0, str(PROJECT / "tests"))
+    from winshare import build_windows_share
+    return build_windows_share(tmp_path)
+
+
+@pytest.fixture
+def make_real(tmp_path, win):
+    """실제 모드 서비스 팩토리: make_real(identity=..., home=...) — 합성 공유를 등록한 상태."""
+    import sys
+    sys.path.insert(0, str(PROJECT / "tests"))
+    from winshare import UNC_ROOT
+    from core.identity import WindowsIdentity
+    from core.services import build_real_services
+
+    def _make(*, user="tester", domain="CORP", home=None, register=True, full_text=False, max_mb=None, **cfg):
+        svc = build_real_services(home or tmp_path / "home", fs=win.fs, identity=WindowsIdentity(domain, user))
+        if max_mb is not None:
+            svc.config.max_file_mb = max_mb
+        for k, v in cfg.items():
+            setattr(svc.config, k, v)
+        if register and not svc.shares.list():
+            svc.shares.register_unc("계리평가팀", UNC_ROOT)
+        if full_text:
+            from core.services import apply_index_mode
+            apply_index_mode(svc, "full_text", approver="SEC-TEST", acknowledged=True)
+        return svc
+    return _make

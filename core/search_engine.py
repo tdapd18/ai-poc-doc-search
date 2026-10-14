@@ -24,7 +24,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 
 from core.access_control import AccessController, User
@@ -82,6 +82,8 @@ class SearchResult:
     share: str = ""
     hit_count: int = 0  # 일치한 문단(위치) 수
     name_match: bool = False  # 파일명/제목에서 일치
+    index_level: str = "full"  # full | metadata(본문 미색인)
+    stale: bool = False  # 색인 이후 원본이 변경됨 → 색인 갱신 필요
 
 
 @dataclass
@@ -95,6 +97,8 @@ class SearchResponse:
     total_matched: int = 0  # 권한 필터 이후 일치 문서 수 (top_k 로 잘리기 전)
     generation: int = 0
     from_cache: bool = False
+    metadata_only_count: int = 0  # (권한·필터 적용 후) 본문이 색인되지 않은 문서 수
+    volatile: bool = False  # 표시 직전 재검증에서 일부 후보가 거부됨 → 원본 상태가 바뀌면 달라질 수 있어 캐시하지 않는다
 
 
 def _count(text: str, term: str) -> int:
@@ -122,9 +126,11 @@ class SearchEngine:
         """캐시된 결과의 모든 문서가 지금도 존재·열람 가능·동일 내용인지 재검증."""
         for r in response.results:
             doc = self.indexer.get_document(r.doc_id)
-            if doc is None or not self.access.can_access(user, doc):
+            if doc is None or not self.access.verify(user, doc):  # 캐시 적중이어도 지금 접근 가능한지 재확인
                 return False
             if self.indexer.content_hash_of(r.doc_id) != r.content_hash:
+                return False
+            if self.access.is_stale(doc) != r.stale:
                 return False
         return True
 
@@ -162,7 +168,8 @@ class SearchEngine:
 
         response = self._search_uncached(user, query, categories, sources, top_k, unavailable, generation,
                                          file_types, locations, date_from, date_to, scope, sort, descending)
-        self._cache[cache_key] = (generation, response)
+        if not response.volatile:  # 일부 후보가 일시적으로 거부된 응답(오프라인·잠금 등)은 복구 후에도 남지 않도록 캐시하지 않는다
+            self._cache[cache_key] = (generation, response)
         # 로그: 검색어/본문은 기록하지 않는다 (길이와 건수만)
         log_event(_log, "search", user=user.user_id, query_len=len(query), status=response.status,
                   results=len(response.results), scope=scope, cache=False)
@@ -204,14 +211,28 @@ class SearchEngine:
                                   "업무 용어를 포함해 다시 질문해 주세요.", analysis=analysis,
                                   unavailable_sources=unavailable, generation=generation)
 
+        meta_only = sum(1 for d in docs if d.index_level == "metadata")
         scored = [r for r in (self._score_document(d, analysis, scope) for d in docs) if r]
         scored = self._sort(scored, sort, descending)
         total = len(scored)
-        if not scored:
+        # 표시 직전 엄격 재검증: 삭제·권한 회수·공유 불가인 문서는 건너뛰고 다음 순위로 채운다
+        final: list[SearchResult] = []
+        rejected = 0
+        for r in scored:
+            if len(final) >= top_k:
+                break
+            doc = self.indexer.get_document(r.doc_id)
+            if doc is None or not self.access.verify(user, doc):
+                rejected += 1
+                continue
+            final.append(replace(r, stale=True) if self.access.is_stale(doc) else r)
+        if not final:
             return SearchResponse(query, "no_results", "질문과 관련된 문서를 찾지 못했습니다.", analysis=analysis,
-                                  unavailable_sources=unavailable, generation=generation)
-        return SearchResponse(query, "ok", results=scored[:top_k], analysis=analysis, total_matched=total,
-                              unavailable_sources=unavailable, generation=generation)
+                                  unavailable_sources=unavailable, generation=generation,
+                                  metadata_only_count=meta_only, volatile=bool(rejected))
+        return SearchResponse(query, "ok", results=final, analysis=analysis, total_matched=total,
+                              unavailable_sources=unavailable, generation=generation, metadata_only_count=meta_only,
+                              volatile=bool(rejected))
 
     @staticmethod
     def _sort(results: list[SearchResult], sort: str, descending: bool) -> list[SearchResult]:
@@ -271,10 +292,17 @@ class SearchEngine:
         core_concepts = [c for c in concepts if not c.generic] or concepts
         use_name = scope in ("all", "name")
         use_body = scope in ("all", "body")
+        metadata_level = doc.index_level == "metadata"
+        if metadata_level:
+            if scope == "body":
+                return None  # 본문이 색인되지 않은 문서는 본문 검색 대상이 아니다
+            use_body = False
 
         title_score, title_hit = 0.0, set()
         if use_name:
-            name_text = normalize_text(f"{doc.title} {doc.file_name}", self.dictionary)
+            # 메타데이터 수준 문서는 폴더 경로도 이름 검색 대상이다 (예: 폴더명으로 찾기)
+            name_text = normalize_text(f"{doc.title} {doc.file_name}" + (f" {doc.location}" if metadata_level else ""),
+                                       self.dictionary)
             for c in concepts:
                 w, n, _ = self._best_variant(c, name_text)
                 if n:
@@ -306,13 +334,14 @@ class SearchEngine:
             content_hash=self.indexer.content_hash_of(doc.doc_id) or "",
             score=round(score, 1), coverage=round(doc_cov, 2), passages=passages, file_type=doc.file_type,
             file_name=doc.file_name, share=doc.share, hit_count=len(chunk_scores), name_match=bool(title_hit),
+            index_level=doc.index_level,
         )
 
     # -- 문서 안 일치 위치 (미리보기의 이전/다음 이동용) ------------------------
     def matching_chunks(self, user: User | None, doc_id: str, query: str) -> list[tuple[int, str, float]]:
         """문서 안에서 질의와 일치하는 문단 [(seq, 위치, 점수)] — 문서 순서. 권한이 없으면 빈 목록."""
         doc = self.indexer.get_document(doc_id)
-        if doc is None or not self.access.can_access(user, doc) or not query.strip():
+        if doc is None or not self.access.verify(user, doc) or not query.strip():
             return []
         analysis = analyze_query(query, self.dictionary)
         if not analysis.concepts:
@@ -332,7 +361,7 @@ class SearchEngine:
     def open_document(self, user: User | None, doc_id: str) -> tuple[Document, list[Chunk]] | None:
         """원문 미리보기. 문서가 없거나 권한이 없거나 저장소가 검색 불가 상태면 None (사유를 구분하지 않는다)."""
         doc = self.indexer.get_document(doc_id)
-        if doc is None or not self.access.can_access(user, doc):
+        if doc is None or not self.access.verify(user, doc):
             return None
         statuses = {s["source_key"]: s["status"] for s in self.indexer.source_statuses()}
         if statuses.get(doc.source_key) != "ok":
