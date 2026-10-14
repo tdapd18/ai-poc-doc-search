@@ -1,7 +1,9 @@
 # 계리 업무자료 AI 통합검색 Tool (교육용 PoC)
 
-공유폴더 · 그룹웨어 · 업무시스템에 흩어진 **가상의** 계리 업무자료를 자연어로 통합 검색하고,
-관련 원문 문단·근거 문서·원본 위치를 한 화면에서 확인하는 Streamlit 웹앱입니다.
+여러 공유폴더(UNC) · 그룹웨어 · 업무시스템에 흩어진 **가상의** 계리 업무자료(MD/TXT/PDF/Excel/PowerPoint)를 검색하고,
+일치한 **원문 위치**(PDF 쪽 · Excel 시트/셀 · PPT 슬라이드 · 텍스트 줄)와 원본 UNC 경로를 한 화면에서 확인하는 Streamlit 웹앱입니다.
+
+![검색 화면](docs/screenshot_search.png)
 
 > **교육용 PoC 범위**
 > - 모든 자료는 `data/` 의 **직접 만든 가상 더미데이터**입니다. 실제 사내 시스템·인터넷·외부 API 에 연결하지 않습니다.
@@ -20,11 +22,14 @@ actuarial_ai_search/
 ├── docs/
 │   ├── DESIGN.md          # 설계, 점수 규칙, 보안 설계, 사내망 연동 시 추가 필요사항
 │   └── TEST_RESULTS.md    # 자동 테스트 결과표 (입력조건 / 예상 / 실제 / 통과)
+├── tools/make_sample_files.py  # 샘플 PDF/Excel/PPT 생성기 (개발 전용, requirements-dev.txt 필요)
 ├── connectors/            # 저장소별 Connector (공통 인터페이스 base.py)
 │   ├── base.py  shared_folder.py  groupware.py  business_system.py
 ├── core/
 │   ├── models.py          # 공통 문서 스키마
-│   ├── document_parser.py # 메타데이터 파싱, 문단 분할, 지시문 의심 탐지
+│   ├── document_parser.py # 메타데이터 파싱, 문단 분할(줄 번호), 지시문 의심 탐지
+│   ├── extractors.py      # PDF(쪽)/Excel(시트·셀)/PPT(슬라이드) 추출 — 표준 라이브러리만 사용
+│   ├── shares.py          # 공유폴더(UNC) 등록부
 │   ├── indexer.py         # SQLite 색인 (documents / chunks / source_status)
 │   ├── text_utils.py      # 한국어 용어 정규화·동의어 확장
 │   ├── search_engine.py   # 점수 산정, 권한 필터, 캐시 재검증
@@ -35,11 +40,12 @@ actuarial_ai_search/
 │   ├── history.py         # 이전 답변 내역 재검증
 │   └── services.py, config.py, logging_utils.py, presentation.py
 ├── data/
-│   ├── shared_folder/ groupware/posts/ business_system/records/   # 가상 문서 10건
+│   ├── shared_folder/{계리평가,재무공유,관리}/ groupware/posts/ business_system/records/   # 가상 문서 15건
 │   ├── metadata/search_dictionary.json   # 동의어·불용어·별칭 사전
+│   ├── metadata/shares.json              # 등록된 공유폴더(UNC ↔ 가상 폴더)
 │   └── demo_users.json                   # 가상 사용자 3명
 ├── database/              # SQLite 색인 파일(index.db)이 자동 생성되는 위치 (git 제외)
-└── tests/                 # pytest (자동 테스트 69건)
+└── tests/                 # pytest (자동 테스트 141건, 브라우저 테스트 3건 포함)
 ```
 
 ## Windows PC 실행 방법 (PowerShell)
@@ -63,6 +69,8 @@ python -m streamlit run app.py
 
 # 5) 자동 테스트 실행 (다른 터미널, 가상환경 활성화 후)
 python -m pytest
+#   브라우저(Chromium) 종단 테스트까지 실행하려면 (선택):
+#   python -m pip install -r requirements-dev.txt ; python -m playwright install chromium
 #   결과표를 파일로 저장하려면:
 python -m pytest --report-md docs/TEST_RESULTS.md
 ```
@@ -82,17 +90,33 @@ macOS/Linux 는 `python3 -m venv .venv && source .venv/bin/activate` 후 동일�
 
 ## 주요 기능
 
-- 3개 저장소 통합 검색, 자연어 질문, 동의어(예: *RAFM 실행 오류 = 모델 에러 = 모델 실행 실패*), 분류·저장소 필터, 상위 5건, 원문 문단 표시
-- 사용자별 접근권한(가상 사용자 3명): 비인가 문서는 검색·미리보기·AI 근거·건수·캐시·이전 답변 어디에도 나타나지 않음
-- `색인 갱신` 버튼: 신규/수정/삭제/버전 변경/권한 변경 반영 (저장소 한 곳이 실패해도 나머지는 계속 동작, 실패 저장소는 화면에 표시)
-- 문서 속 악성 지시문은 **실행하지 않고** 경고 표시 + AI 전달 제외
+- **화면 구성**: 왼쪽 `검색 범위 및 필터` / 가운데 `검색 결과` / 오른쪽 `관련 원문 미리보기`
+- **검색 결과 행**: 문서명(파일명), 파일 형식 배지, 수정일, **원본 UNC 경로**, 관련도 점수, 일치 위치 수와 위치별 발췌
+  - 위치 표기: PDF `p.2` · Excel `시트 '요약' · 셀 A3:E3` · PowerPoint `슬라이드 3` · MD/TXT `줄 14–18` · 게시글/레코드 `§ 소제목`
+- **필터·정렬**: 위치(공유폴더별 다중 선택) · 문서 유형 · 분류 · 수정일(최근 7/30/90일, 직접 지정). 값을 바꾸면 검색 버튼 없이 즉시 재검색.
+  검색 대상(파일명+본문 / 파일명만 / 본문만), 정렬(관련도·수정일·파일명·형식·경로, 오름/내림), 결과 수(5/10/20)
+- **원문 미리보기**: 일치 단어 형광펜, 선택 위치 강조, `이전/다음 일치` 이동, 일치 문단만 보기, UNC 경로·상위 폴더 경로 **복사 버튼**
+- **공유폴더 등록(관리자)**: UNC 경로를 가상 폴더에 연결해 여러 공유를 한 번에 검색 (실제 SMB 접속은 구현하지 않음)
+- 사용자별 접근권한(가상 사용자 3명): 비인가 문서는 검색·미리보기·AI 근거·건수·필터 선택지·캐시·이전 답변 어디에도 나타나지 않음
+- `색인 갱신` 버튼: 신규/수정/삭제/버전/권한 변경 반영 (저장소 한 곳이 실패해도 나머지는 계속 동작, 실패 저장소는 화면에 표시)
+- 문서 속 악성 지시문은 **실행하지 않고** 경고 표시 + AI 전달 제외. AI 답변 모드는 Mock 구조 테스트만 제공
 - 검색 방식·점수 규칙: [`docs/DESIGN.md`](docs/DESIGN.md) 와 `core/search_engine.py` 상단 주석
+
+## 참고한 검색 도구와 이 프로젝트의 차이
+
+| 참고 도구 | 참고한 아이디어 | 이 프로젝트의 구현 (코드·디자인은 독자 구현) |
+|---|---|---|
+| DocFetcher | 본문 검색, 일치 단어 강조, 원문 미리보기 | 일치 단어 형광펜 + 일치 문맥 발췌 + 미리보기 `이전/다음 일치` |
+| FileLocator Pro | UNC 공유폴더 등록, 다중 경로 검색 | 등록부(`shares.json`) 기반 다중 공유 + 위치 필터 (가상 폴더 연결) |
+| Everything | 파일명 검색, 정렬 가능한 간결한 결과 목록 | `파일명만` 검색 대상, 형식/경로/수정일 정렬, 검색 전 문서 목록 |
+| Copernic Desktop Search | 문서 유형·위치·수정일 필터 | 유형/위치/분류/수정일 필터 + 선택지별 문서 수(접근 가능 문서 기준) |
 
 ## 구현 현황 요약
 
 | 구분 | 상태 |
 |---|---|
 | 웹앱, Connector 3종, 통합 검색, 권한, 동기화, 근거 확인 | 구현 및 자동 테스트 통과 |
+| 다중 UNC 공유 등록, PDF/Excel/PPT 위치 추출, 필터·정렬·미리보기·경로 복사 | 구현 및 자동/브라우저 테스트 통과 (실제 SMB 접속은 미구현) |
 | AI 답변 모드 | **인터페이스 + Mock 만 구현·테스트.** 실제 LLM 연결 없음 |
-| 실제 사내망(SMB/그룹웨어/업무시스템/SSO) 연동, 자동 스케줄러 | **미구현 (후속 과제)** — `docs/DESIGN.md` §8 |
+| 실제 사내망(SMB/그룹웨어/업무시스템/SSO) 연동, 자동 스케줄러, 스캔 PDF(OCR)·임베디드 폰트 PDF 추출 | **미구현 (후속 과제)** — `docs/DESIGN.md` §8 |
 | Windows PC 실제 실행 | **미검증**(개발은 Linux/Python 3.13 에서 수행) |

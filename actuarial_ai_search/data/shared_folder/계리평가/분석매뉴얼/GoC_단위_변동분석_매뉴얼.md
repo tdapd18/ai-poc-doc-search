@@ -6,7 +6,6 @@ version: 1.4
 created_at: 2025-05-22
 modified_at: 2026-08-18
 department: 계리평가팀
-location: smb://fileserver.example.invalid/actuarial/분석매뉴얼/GoC_단위_변동분석_매뉴얼.md
 allowed_users: []
 allowed_groups: [actuarial]
 ---

@@ -1,0 +1,13 @@
+{
+  "allowed_users": [],
+  "version": "1.2",
+  "department": "계리평가팀",
+  "doc_id": "SF-102",
+  "title": "모델별 검증결과 집계 (2026-09)",
+  "category": "RAFM",
+  "created_at": "2026-10-05",
+  "modified_at": "2026-10-06",
+  "allowed_groups": [
+    "actuarial"
+  ]
+}

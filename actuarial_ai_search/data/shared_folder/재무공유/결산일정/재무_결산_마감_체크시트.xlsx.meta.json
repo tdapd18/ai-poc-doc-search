@@ -1,0 +1,14 @@
+{
+  "allowed_users": [],
+  "version": "1.0",
+  "department": "재무팀",
+  "doc_id": "SF-201",
+  "title": "재무 결산 마감 체크시트",
+  "category": "결산",
+  "created_at": "2026-10-01",
+  "modified_at": "2026-10-12",
+  "allowed_groups": [
+    "finance",
+    "actuarial"
+  ]
+}

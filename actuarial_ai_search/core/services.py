@@ -13,6 +13,7 @@ from core.answer_generator import AnswerGenerator
 from core.indexer import Indexer
 from core.llm_client import LLMClient, build_client
 from core.search_engine import SearchEngine
+from core.shares import ShareRegistry
 from core.sync_manager import SyncManager
 from core.text_utils import SearchDictionary
 
@@ -26,6 +27,7 @@ class Services:
     sync: SyncManager
     engine: SearchEngine
     answers: AnswerGenerator
+    shares: ShareRegistry | None = None
 
 
 def build_services(data_dir: Path | str, db_path: Path | str, llm: LLMClient | None = None,
@@ -34,8 +36,10 @@ def build_services(data_dir: Path | str, db_path: Path | str, llm: LLMClient | N
     indexer = Indexer(db_path)
     access = AccessController.from_file(data_dir / "demo_users.json")
     dictionary = SearchDictionary.from_file(data_dir / "metadata" / "search_dictionary.json")
+    shares_file = data_dir / "metadata" / "shares.json"
+    registry = ShareRegistry(shares_file, data_dir / "shared_folder") if shares_file.is_file() else None
     connectors = connectors if connectors is not None else [
-        SharedFolderConnector(data_dir / "shared_folder"),
+        SharedFolderConnector(data_dir / "shared_folder", registry),
         GroupwareConnector(data_dir / "groupware"),
         BusinessSystemConnector(data_dir / "business_system"),
     ]
@@ -43,5 +47,5 @@ def build_services(data_dir: Path | str, db_path: Path | str, llm: LLMClient | N
     return Services(
         data_dir=data_dir, indexer=indexer, access=access, connectors=connectors,
         sync=SyncManager(indexer, connectors), engine=engine,
-        answers=AnswerGenerator(indexer, access, llm or build_client(llm_provider)),
+        answers=AnswerGenerator(indexer, access, llm or build_client(llm_provider)), shares=registry,
     )

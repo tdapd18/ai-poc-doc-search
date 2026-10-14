@@ -3,27 +3,29 @@
 === 검색 순서 (보안상 중요) ===
 1. 마지막 동기화에 성공한 저장소의 문서만 후보로 삼는다 (오류 저장소는 제외하고 사용자에게 알린다).
 2. **접근권한 필터를 점수 계산보다 먼저** 적용한다. 비인가 문서는 점수 계산, 결과 개수, 통계,
-   캐시, AI 컨텍스트 어디에도 등장하지 않는다.
-3. 카테고리/저장소 필터 적용.
-4. 문단 단위 점수 → 문서 점수 → 정렬 → 상위 K개(최대 5).
+   필터별 건수, 캐시, AI 컨텍스트 어디에도 등장하지 않는다.
+3. 사용자 필터: 분류 / 저장소 / 위치(공유폴더별) / 문서 유형 / 수정일 범위.
+4. 검색 대상(scope): all=파일명·제목+본문, name=파일명·제목만, body=본문만.
+5. 문단 점수 → 문서 점수 → 정렬(관련도/수정일/파일명/형식/경로) → 상위 K개(기본 5, 최대 20).
 
-=== 점수 규칙 (SCORING.md 와 동일) ===
+=== 점수 규칙 (docs/DESIGN.md 와 동일) ===
 개념(concept) = 질의 토큰 1개 + 그 동의어. 개념마다 문서 안에서 가장 잘 맞는 용어 1개의 가중치 w 를 쓴다
 (원 질의어 1.0, 동의어 0.6, 일반어 0.3).
 
   문단 점수 raw  = Σ_개념 [ 본문 w·min(출현횟수,3)  +  소제목 일치 3·w ]  +  어구 보너스
   어구 보너스    = 질의에서 연속된 두 토큰이 본문에 같은 순서로 붙어 나오면 +1.5 (쌍마다)
   문단 점수      = raw × (0.5 + 0.5 × 문단 적합도)         # 적합도 = 제목∪소제목∪본문에서 일치한 개념 비율
-  제목 점수      = Σ_개념 5·w (문서 제목에 일치한 개념)
+  제목 점수      = Σ_개념 5·w (문서 제목 또는 파일명에 일치; 파일명 검색 대상일 때만)
   문서 점수      = 제목 점수 + 최고 문단 점수 + 0.25 × (그 다음 문단 최대 3개 점수 합)
   문서 적합도    = 문서 전체(제목·소제목·본문)에서 일치한 개념 비율
   결과 포함 조건 = 문서 적합도 ≥ 0.5 (일반어만 일치하는 문서는 제외) 그리고 문서 점수 ≥ 1.0
-  정렬           = 문서 점수 내림차순 → 최종 수정일 최신순 → 문서 ID
+  기본 정렬      = 문서 점수 내림차순 → 최종 수정일 최신 → 문서 ID
 """
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import date
 
 from core.access_control import AccessController, User
 from core.indexer import Indexer
@@ -33,10 +35,18 @@ from core.text_utils import Concept, QueryAnalysis, SearchDictionary, analyze_qu
 
 MIN_DOC_COVERAGE = 0.5
 MIN_DOC_SCORE = 1.0
-MAX_TOP_K = 5
+DEFAULT_TOP_K = 5
+MAX_TOP_K = 20
 TITLE_W, HEADING_W, BODY_CAP, PHRASE_BONUS = 5.0, 3.0, 3, 1.5
+SCOPES = ("all", "name", "body")
+SORTS = ("relevance", "modified", "name", "type", "path")
 
 _log = get_logger()
+
+
+def location_key(doc: Document) -> str:
+    """위치 필터 키: 공유폴더는 공유별(`shared_folder:표시이름`), 나머지는 저장소 키."""
+    return f"shared_folder:{doc.share}" if doc.source_key == "shared_folder" and doc.share else doc.source_key
 
 
 @dataclass(frozen=True)
@@ -48,6 +58,7 @@ class Passage:
     flagged: bool = False
     flag_reason: str = ""
     matched_terms: tuple[str, ...] = ()
+    loc: str = ""  # 원문 위치 (p.2 / 시트·셀 / 슬라이드 / 줄)
 
 
 @dataclass(frozen=True)
@@ -60,12 +71,17 @@ class SearchResult:
     version: str
     modified_at: str
     department: str
-    location: str
+    location: str  # 공유폴더: 원본 UNC 경로 / 그 외: 가상 URL
     location_detail: str
     content_hash: str
     score: float
     coverage: float
     passages: tuple[Passage, ...]
+    file_type: str = "md"
+    file_name: str = ""
+    share: str = ""
+    hit_count: int = 0  # 일치한 문단(위치) 수
+    name_match: bool = False  # 파일명/제목에서 일치
 
 
 @dataclass
@@ -83,6 +99,12 @@ class SearchResponse:
 
 def _count(text: str, term: str) -> int:
     return text.count(term) if term else 0
+
+
+def _to_iso(d: date | str | None) -> str | None:
+    if d is None or d == "":
+        return None
+    return d.isoformat() if isinstance(d, date) else str(d)
 
 
 class SearchEngine:
@@ -108,8 +130,16 @@ class SearchEngine:
 
     # -- 검색 ----------------------------------------------------------------
     def search(self, user: User | None, query: str, categories: list[str] | None = None,
-               sources: list[str] | None = None, top_k: int = MAX_TOP_K) -> SearchResponse:
+               sources: list[str] | None = None, top_k: int = DEFAULT_TOP_K, *,
+               file_types: list[str] | None = None, locations: list[str] | None = None,
+               modified_from: date | str | None = None, modified_to: date | str | None = None,
+               scope: str = "all", sort: str = "relevance", descending: bool | None = None) -> SearchResponse:
         top_k = max(1, min(MAX_TOP_K, top_k))
+        scope = scope if scope in SCOPES else "all"
+        sort = sort if sort in SORTS else "relevance"
+        if descending is None:
+            descending = sort in ("relevance", "modified")
+        date_from, date_to = _to_iso(modified_from), _to_iso(modified_to)
         generation = self.indexer.get_generation()
         unavailable = [s["source_label"] for s in self.indexer.source_statuses() if s["status"] != "ok"]
 
@@ -120,7 +150,9 @@ class SearchEngine:
             return SearchResponse(query or "", "empty_query", "검색어를 입력해 주세요.", generation=generation)
 
         cache_key = (user.user_id, normalize_text(query.strip(), self.dictionary),
-                     tuple(sorted(categories or [])), tuple(sorted(sources or [])), top_k)
+                     tuple(sorted(categories or [])), tuple(sorted(sources or [])), top_k,
+                     tuple(sorted(file_types or [])), tuple(sorted(locations or [])), date_from, date_to,
+                     scope, sort, descending)
         cached = self._cache.get(cache_key)
         if cached:
             if cached[0] == generation and self._revalidate(user, cached[1]):
@@ -128,14 +160,33 @@ class SearchEngine:
                 return SearchResponse(**{**hit.__dict__, "from_cache": True})
             del self._cache[cache_key]  # 색인이 바뀌었거나 재검증 실패 → 폐기 후 재계산
 
-        response = self._search_uncached(user, query, categories, sources, top_k, unavailable, generation)
+        response = self._search_uncached(user, query, categories, sources, top_k, unavailable, generation,
+                                         file_types, locations, date_from, date_to, scope, sort, descending)
         self._cache[cache_key] = (generation, response)
         # 로그: 검색어/본문은 기록하지 않는다 (길이와 건수만)
         log_event(_log, "search", user=user.user_id, query_len=len(query), status=response.status,
-                  results=len(response.results), cache=False)
+                  results=len(response.results), scope=scope, cache=False)
         return response
 
-    def _search_uncached(self, user, query, categories, sources, top_k, unavailable, generation) -> SearchResponse:
+    @staticmethod
+    def _apply_filters(docs: list[Document], categories, sources, file_types, locations, date_from,
+                       date_to) -> list[Document]:
+        if categories:
+            docs = [d for d in docs if d.category in categories]
+        if sources:
+            docs = [d for d in docs if d.source_key in sources]
+        if file_types:
+            docs = [d for d in docs if d.file_type in file_types]
+        if locations:
+            docs = [d for d in docs if location_key(d) in locations]
+        if date_from:
+            docs = [d for d in docs if d.modified_at >= date_from]
+        if date_to:
+            docs = [d for d in docs if d.modified_at <= date_to]
+        return docs
+
+    def _search_uncached(self, user, query, categories, sources, top_k, unavailable, generation, file_types,
+                         locations, date_from, date_to, scope, sort, descending) -> SearchResponse:
         statuses = self.indexer.source_statuses()
         if not any(s["status"] == "ok" for s in statuses):
             msg = ("검색 가능한 저장소가 없습니다. 저장소 연결 상태를 확인한 뒤 '색인 갱신'을 실행해 주세요."
@@ -145,10 +196,7 @@ class SearchEngine:
         # 1) 권한 필터 (점수 계산 이전)
         docs = self.access.filter_documents(user, docs)
         # 2) 사용자 필터
-        if categories:
-            docs = [d for d in docs if d.category in categories]
-        if sources:
-            docs = [d for d in docs if d.source_key in sources]
+        docs = self._apply_filters(docs, categories, sources, file_types, locations, date_from, date_to)
 
         analysis = analyze_query(query, self.dictionary)
         if not analysis.concepts:
@@ -156,12 +204,8 @@ class SearchEngine:
                                   "업무 용어를 포함해 다시 질문해 주세요.", analysis=analysis,
                                   unavailable_sources=unavailable, generation=generation)
 
-        scored: list[SearchResult] = []
-        for doc in docs:
-            res = self._score_document(doc, analysis)
-            if res:
-                scored.append(res)
-        scored.sort(key=lambda r: (-r.score, _neg_date(r.modified_at), r.doc_id))
+        scored = [r for r in (self._score_document(d, analysis, scope) for d in docs) if r]
+        scored = self._sort(scored, sort, descending)
         total = len(scored)
         if not scored:
             return SearchResponse(query, "no_results", "질문과 관련된 문서를 찾지 못했습니다.", analysis=analysis,
@@ -169,8 +213,22 @@ class SearchEngine:
         return SearchResponse(query, "ok", results=scored[:top_k], analysis=analysis, total_matched=total,
                               unavailable_sources=unavailable, generation=generation)
 
+    @staticmethod
+    def _sort(results: list[SearchResult], sort: str, descending: bool) -> list[SearchResult]:
+        if sort == "relevance":
+            base = sorted(results, key=lambda r: (-r.score, _neg_date(r.modified_at), r.doc_id))
+            return base if descending else list(reversed(base))
+        keys = {
+            "modified": lambda r: (r.modified_at, r.doc_id),
+            "name": lambda r: ((r.file_name or r.title).casefold(), r.doc_id),
+            "type": lambda r: (r.file_type, (r.file_name or r.title).casefold()),
+            "path": lambda r: (r.location.casefold(), r.doc_id),
+        }
+        return sorted(results, key=keys[sort], reverse=descending)
+
     # -- 점수 계산 -----------------------------------------------------------
-    def _best_variant(self, concept: Concept, text: str) -> tuple[float, int, str]:
+    @staticmethod
+    def _best_variant(concept: Concept, text: str) -> tuple[float, int, str]:
         """text 안에서 개념의 가장 높은 가중치 용어와 (가중치, 출현횟수, 용어)를 반환."""
         best = (0.0, 0, "")
         for term, w in concept.variants:
@@ -179,21 +237,11 @@ class SearchEngine:
                 best = (w, n, term)
         return best
 
-    def _score_document(self, doc: Document, analysis: QueryAnalysis) -> SearchResult | None:
+    def _chunk_scores(self, chunks: list[Chunk], analysis: QueryAnalysis, title_hit: set[str]):
+        """문단별 (점수, 문단, 일치용어, 일치개념집합). raw 가 0 이면 제외."""
         concepts = analysis.concepts
-        core_concepts = [c for c in concepts if not c.generic] or concepts
-        title = normalize_text(doc.title, self.dictionary)
-        chunks = self.indexer.get_chunks(doc.doc_id)
-
-        title_score, title_hit = 0.0, set()
-        for c in concepts:
-            w, n, _ = self._best_variant(c, title)
-            if n:
-                title_score += TITLE_W * w
-                title_hit.add(c.term)
-
-        doc_hit = set(title_hit)
-        chunk_scores: list[tuple[float, Chunk, tuple[str, ...]]] = []
+        core = [c for c in concepts if not c.generic] or concepts
+        out = []
         for ch in chunks:
             text = normalize_text(ch.text, self.dictionary)
             heading = normalize_text(ch.heading, self.dictionary)
@@ -213,38 +261,73 @@ class SearchEngine:
             for a, b in zip(toks, toks[1:]):
                 if f"{a} {b}" in text:
                     raw += PHRASE_BONUS
-            doc_hit |= hit
-            cov = len({c.term for c in core_concepts} & hit) / len(core_concepts)
             if raw > 0:
-                chunk_scores.append((raw * (0.5 + 0.5 * cov), ch, tuple(dict.fromkeys(terms))))
+                cov = len({c.term for c in core} & hit) / len(core)
+                out.append((raw * (0.5 + 0.5 * cov), ch, tuple(dict.fromkeys(terms)), hit))
+        return out
+
+    def _score_document(self, doc: Document, analysis: QueryAnalysis, scope: str = "all") -> SearchResult | None:
+        concepts = analysis.concepts
+        core_concepts = [c for c in concepts if not c.generic] or concepts
+        use_name = scope in ("all", "name")
+        use_body = scope in ("all", "body")
+
+        title_score, title_hit = 0.0, set()
+        if use_name:
+            name_text = normalize_text(f"{doc.title} {doc.file_name}", self.dictionary)
+            for c in concepts:
+                w, n, _ = self._best_variant(c, name_text)
+                if n:
+                    title_score += TITLE_W * w
+                    title_hit.add(c.term)
+
+        doc_hit = set(title_hit)
+        chunk_scores = []
+        if use_body:
+            chunk_scores = self._chunk_scores(self.indexer.get_chunks(doc.doc_id), analysis, title_hit)
+            for *_, hit in chunk_scores:
+                doc_hit |= hit
 
         doc_cov = len({c.term for c in core_concepts} & doc_hit) / len(core_concepts)
         chunk_scores.sort(key=lambda x: (-x[0], x[1].seq))
         best = chunk_scores[0][0] if chunk_scores else 0.0
-        rest = sum(s for s, _, _ in chunk_scores[1:4])
+        rest = sum(s for s, *_ in chunk_scores[1:4])
         score = title_score + best + 0.25 * rest
         if doc_cov < MIN_DOC_COVERAGE or score < MIN_DOC_SCORE:
             return None
         passages = tuple(
-            Passage(ch.seq, ch.heading, ch.text, round(s, 2), ch.flagged, ch.flag_reason, terms)
-            for s, ch, terms in chunk_scores[:2]
+            Passage(ch.seq, ch.heading, ch.text, round(s, 2), ch.flagged, ch.flag_reason, terms, ch.loc)
+            for s, ch, terms, _ in chunk_scores[:3]
         )
         return SearchResult(
             doc_id=doc.doc_id, title=doc.title, source_key=doc.source_key, source_system=doc.source_system,
             category=doc.category, version=doc.version, modified_at=doc.modified_at, department=doc.department,
-            location=doc.location, location_detail=doc.location_detail, content_hash=doc.content_hash(),
-            score=round(score, 1), coverage=round(doc_cov, 2), passages=passages,
+            location=doc.location, location_detail=doc.location_detail,
+            content_hash=self.indexer.content_hash_of(doc.doc_id) or "",
+            score=round(score, 1), coverage=round(doc_cov, 2), passages=passages, file_type=doc.file_type,
+            file_name=doc.file_name, share=doc.share, hit_count=len(chunk_scores), name_match=bool(title_hit),
         )
+
+    # -- 문서 안 일치 위치 (미리보기의 이전/다음 이동용) ------------------------
+    def matching_chunks(self, user: User | None, doc_id: str, query: str) -> list[tuple[int, str, float]]:
+        """문서 안에서 질의와 일치하는 문단 [(seq, 위치, 점수)] — 문서 순서. 권한이 없으면 빈 목록."""
+        doc = self.indexer.get_document(doc_id)
+        if doc is None or not self.access.can_access(user, doc) or not query.strip():
+            return []
+        analysis = analyze_query(query, self.dictionary)
+        if not analysis.concepts:
+            return []
+        scores = self._chunk_scores(self.indexer.get_chunks(doc_id), analysis, set())
+        return sorted(((ch.seq, ch.loc, round(s, 2)) for s, ch, *_ in scores))
 
     # -- 목록/미리보기 (권한 검증 포함) -------------------------------------
     def list_visible_documents(self, user: User | None, categories: list[str] | None = None,
-                               sources: list[str] | None = None) -> list[Document]:
+                               sources: list[str] | None = None, *, file_types: list[str] | None = None,
+                               locations: list[str] | None = None, modified_from: date | str | None = None,
+                               modified_to: date | str | None = None) -> list[Document]:
         docs = self.access.filter_documents(user, self.indexer.list_documents(searchable_only=True))
-        if categories:
-            docs = [d for d in docs if d.category in categories]
-        if sources:
-            docs = [d for d in docs if d.source_key in sources]
-        return docs
+        return self._apply_filters(docs, categories, sources, file_types, locations, _to_iso(modified_from),
+                                   _to_iso(modified_to))
 
     def open_document(self, user: User | None, doc_id: str) -> tuple[Document, list[Chunk]] | None:
         """원문 미리보기. 문서가 없거나 권한이 없거나 저장소가 검색 불가 상태면 None (사유를 구분하지 않는다)."""
@@ -270,4 +353,5 @@ def highlight_terms(text: str, terms: tuple[str, ...]) -> str:
     return out
 
 
-__all__ = ["SearchEngine", "SearchResponse", "SearchResult", "Passage", "CATEGORIES", "highlight_terms"]
+__all__ = ["SearchEngine", "SearchResponse", "SearchResult", "Passage", "CATEGORIES", "highlight_terms",
+           "location_key", "DEFAULT_TOP_K", "MAX_TOP_K", "SCOPES", "SORTS"]

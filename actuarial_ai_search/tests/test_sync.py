@@ -23,7 +23,7 @@ allowed_groups: [actuarial]
 
 
 def _sf(data):
-    return data / "shared_folder"
+    return data / "shared_folder" / "계리평가"
 
 
 def _result(rep, key):
@@ -47,18 +47,18 @@ class CrashingConnector(BrokenConnector):
 
 def test_initial_sync_indexes_all(svc, rec):
     """입력조건: 최초 색인
-    예상결과: 10건 색인(공유 4/그룹웨어 3/업무 3), 세 저장소 상태 ok"""
-    assert svc.indexer.count_documents() == 10
+    예상결과: 15건 색인(공유 9/그룹웨어 3/업무 3), 세 저장소 상태 ok"""
+    assert svc.indexer.count_documents() == 15
     assert [s["status"] for s in svc.indexer.source_statuses()] == ["ok"] * 3
-    rec("10건 색인, 3개 저장소 ok")
+    rec("15건 색인, 3개 저장소 ok")
 
 
 def test_resync_without_changes_is_noop(svc):
     """입력조건: 변경 없이 색인 갱신 재실행
-    예상결과: 변경 0건, 중복 등록 없음(문서 수 10 유지), 색인 세대 번호 불변"""
+    예상결과: 변경 0건, 중복 등록 없음(문서 수 15 유지), 색인 세대 번호 불변"""
     gen = svc.indexer.get_generation()
     rep = svc.sync.sync()
-    assert not rep.changed and svc.indexer.count_documents() == 10
+    assert not rep.changed and svc.indexer.count_documents() == 15
     assert svc.indexer.get_generation() == gen
 
 
@@ -102,7 +102,7 @@ def test_version_change_detected(svc, data_copy):
     p.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
     bs = _result(svc.sync.sync(), "business_system")
     assert bs.version_changed == ["BS-003"] and not bs.added
-    assert svc.indexer.get_document("BS-003").version == "2.1" and svc.indexer.count_documents() == 10
+    assert svc.indexer.get_document("BS-003").version == "2.1" and svc.indexer.count_documents() == 15
 
 
 def test_deleted_document_removed(svc, users, data_copy, rec):

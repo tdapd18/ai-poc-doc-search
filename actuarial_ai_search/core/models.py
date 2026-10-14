@@ -11,6 +11,17 @@ from dataclasses import dataclass, field
 
 CATEGORIES = ("IFRS17", "RAFM", "결산", "기타")
 
+# 문서 유형(파일 형식) 표시명. 공유폴더는 실제 파일 확장자, 그룹웨어/업무시스템은 자체 유형.
+FILE_TYPES = {
+    "md": "Markdown", "txt": "텍스트", "pdf": "PDF", "xlsx": "Excel", "pptx": "PowerPoint",
+    "post": "게시글", "record": "업무시스템 레코드",
+}
+FILE_TYPE_SHORT = {"md": "MD", "txt": "TXT", "pdf": "PDF", "xlsx": "XLSX", "pptx": "PPTX", "post": "게시글",
+                   "record": "레코드"}
+
+# 문서 안의 한 조각: (소제목/시트/슬라이드 제목, 위치 표기, 텍스트)
+Segment = tuple[str, str, str]
+
 
 class InvalidDocumentError(ValueError):
     """문서 형식 오류. 메시지에는 필드명/사유만 담고 문서 본문은 절대 포함하지 않는다."""
@@ -33,12 +44,17 @@ class Document:
     allowed_groups: tuple[str, ...] = ()
     location_detail: str = ""  # 폴더 경로 / 게시판 / 업무시스템 화면 경로 등
     attachments: tuple[str, ...] = ()
+    file_type: str = "md"  # FILE_TYPES 의 키
+    file_name: str = ""  # 파일명(공유폴더) — 파일명 검색 대상
+    share: str = ""  # 등록된 공유폴더 표시 이름 (공유폴더 문서만)
+    segments: tuple[Segment, ...] = ()  # 형식별 위치(페이지/시트·셀/슬라이드/줄)를 보존한 조각. 없으면 본문에서 분할
 
     def content_hash(self) -> str:
         """본문·메타데이터 해시 (접근권한 제외). 수정/버전 변경 감지용."""
         payload = json.dumps(
             [self.title, self.category, self.version, self.created_at, self.modified_at,
-             self.department, self.location, self.location_detail, list(self.attachments), self.body],
+             self.department, self.location, self.location_detail, list(self.attachments), self.body,
+             self.file_type, self.file_name, self.share, [list(x) for x in self.segments]],
             ensure_ascii=False,
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -58,6 +74,7 @@ class Chunk:
     text: str
     flagged: bool = False  # 지시문 의심 문장 포함 여부
     flag_reason: str = ""
+    loc: str = ""  # 원문 위치: "p.2" / "시트 '요약' · 셀 A5:D5" / "슬라이드 3" / "줄 12–18"
 
 
 @dataclass(frozen=True)

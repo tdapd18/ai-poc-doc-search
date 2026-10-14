@@ -22,9 +22,12 @@ def _parse_value(raw: str):
     return raw.strip('"').strip("'")
 
 
-def parse_front_matter(text: str) -> tuple[dict, str]:
-    """``---`` 로 둘러싼 단순 key: value 메타데이터와 본문을 분리한다 (YAML 부분집합)."""
-    text = text.lstrip("﻿")
+def parse_front_matter_ex(text: str) -> tuple[dict, str, int]:
+    """``---`` 로 둘러싼 단순 key: value 메타데이터와 본문을 분리한다 (YAML 부분집합).
+
+    세 번째 반환값은 본문 첫 줄이 파일의 몇 번째 줄 앞에 있는지(0-기준 줄 오프셋)로, 줄 번호 표기에 쓴다.
+    """
+    text = text.lstrip("\ufeff")
     lines = text.splitlines()
     if not lines or lines[0].strip() != "---":
         raise InvalidDocumentError("메타데이터 블록(---)이 없습니다")
@@ -43,7 +46,14 @@ def parse_front_matter(text: str) -> tuple[dict, str]:
         meta[key.strip()] = _parse_value(value)
     if end is None:
         raise InvalidDocumentError("메타데이터 블록이 닫히지 않았습니다")
-    return meta, "\n".join(lines[end + 1:]).strip("\n")
+    rest = lines[end + 1:]
+    leading_blank = next((k for k, ln in enumerate(rest) if ln.strip()), len(rest))
+    return meta, "\n".join(rest).strip("\n"), end + 1 + leading_blank
+
+
+def parse_front_matter(text: str) -> tuple[dict, str]:
+    meta, body, _ = parse_front_matter_ex(text)
+    return meta, body
 
 
 # ---------------------------------------------------------------- 공통 문서 변환
@@ -64,7 +74,8 @@ def _as_tuple(value) -> tuple[str, ...]:
     return tuple(str(v).strip() for v in value if str(v).strip())
 
 
-def to_common_document(meta: dict, body: str, *, source_key: str, source_system: str) -> Document:
+def to_common_document(meta: dict, body: str, *, source_key: str, source_system: str,
+                       segments: tuple = ()) -> Document:
     """저장소별 원본 구조에서 추출한 공통 필드(dict)를 ``Document`` 로 변환·검증한다."""
     for name in REQUIRED_FIELDS:
         value = meta.get(name)
@@ -96,6 +107,10 @@ def to_common_document(meta: dict, body: str, *, source_key: str, source_system:
         allowed_groups=_as_tuple(meta.get("allowed_groups")),
         location_detail=str(meta.get("location_detail", "")).strip(),
         attachments=_as_tuple(meta.get("attachments")),
+        file_type=str(meta.get("file_type", "md")).strip() or "md",
+        file_name=str(meta.get("file_name", "")).strip(),
+        share=str(meta.get("share", "")).strip(),
+        segments=tuple(segments),
     )
 
 
@@ -127,52 +142,67 @@ def detect_injection(text: str) -> str:
 _HEADING_RE = re.compile(r"^\s{0,3}(#{1,6})\s+(.*\S)\s*$")
 
 
-def split_chunks(title: str, body: str, *, min_chars: int = 30) -> list[Chunk]:
+def split_chunks(title: str, body: str, *, min_chars: int = 30, line_offset: int | None = None) -> list[Chunk]:
     """본문을 (제목 문맥, 문단) 단위로 나눈다.
 
     - 마크다운 제목(#)은 이후 문단의 ``heading`` 이 된다.
     - 빈 줄로 구분된 블록이 문단이며, 표/목록은 한 블록으로 유지된다.
     - 너무 짧은 블록은 다음 블록과 합쳐 의미 없는 조각을 줄인다.
+    - ``line_offset`` 이 주어지면 파일 기준 줄 번호(메타데이터 줄 수 + 본문 줄)를 ``loc`` 에 "줄 a–b" 로 기록한다.
     """
     chunks: list[Chunk] = []
     heading = title
     block: list[str] = []
+    block_start = 0
     pending = ""
+    pending_start = None
 
-    def flush() -> None:
-        nonlocal block, pending
+    def loc_of(start: int, end: int) -> str:
+        if line_offset is None:
+            return ""
+        a, b = start + line_offset + 1, end + line_offset + 1
+        return f"줄 {a}" if a == b else f"줄 {a}–{b}"
+
+    def emit(text: str, start: int, end: int) -> None:
+        reason = detect_injection(text)
+        chunks.append(Chunk(seq=len(chunks), heading=heading, text=text, flagged=bool(reason), flag_reason=reason,
+                            loc=loc_of(start, end)))
+
+    def flush(end: int) -> None:
+        nonlocal block, pending, pending_start
         if not block:
             return
         text = "\n".join(block).strip()
+        start = block_start
         block = []
         if not text:
             return
         if pending:
             text = pending + "\n" + text
-            pending = ""
+            start = pending_start if pending_start is not None else start
+            pending, pending_start = "", None
         if len(text) < min_chars:
-            pending = text
+            pending, pending_start = text, start
             return
-        reason = detect_injection(text)
-        chunks.append(Chunk(seq=len(chunks), heading=heading, text=text, flagged=bool(reason), flag_reason=reason))
+        emit(text, start, end)
 
-    for line in body.splitlines():
+    lines = body.splitlines()
+    for i, line in enumerate(lines):
         m = _HEADING_RE.match(line)
         if m:
-            flush()
+            flush(i - 1)
             if pending:  # 제목 직전 남은 짧은 블록은 독립 문단으로 확정
-                reason = detect_injection(pending)
-                chunks.append(Chunk(seq=len(chunks), heading=heading, text=pending, flagged=bool(reason),
-                                    flag_reason=reason))
-                pending = ""
+                emit(pending, pending_start or 0, i - 1)
+                pending, pending_start = "", None
             heading = m.group(2)
             continue
         if not line.strip():
-            flush()
+            flush(i - 1)
         else:
+            if not block:
+                block_start = i
             block.append(line.rstrip())
-    flush()
+    flush(len(lines) - 1)
     if pending:
-        reason = detect_injection(pending)
-        chunks.append(Chunk(seq=len(chunks), heading=heading, text=pending, flagged=bool(reason), flag_reason=reason))
+        emit(pending, pending_start or 0, len(lines) - 1)
     return chunks

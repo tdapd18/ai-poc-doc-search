@@ -53,6 +53,8 @@ class GroupwareConnector(BaseConnector):
                     "modified_at": data.get("modified_at"),
                     "department": data.get("department"),
                     "location": data.get("url"),
+                    "file_type": "post",
+                    "file_name": data.get("title"),
                     "location_detail": f"그룹웨어 / {data.get('board', '게시판')} / 작성자 {data.get('author', '-')}",
                     "allowed_users": data.get("allowed_users"),
                     "allowed_groups": data.get("allowed_groups"),

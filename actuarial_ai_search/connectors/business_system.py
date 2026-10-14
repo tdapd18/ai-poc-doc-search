@@ -69,6 +69,8 @@ class BusinessSystemConnector(BaseConnector):
                     "modified_at": data.get("modified_at"),
                     "department": data.get("department"),
                     "location": data.get("url"),
+                    "file_type": "record",
+                    "file_name": data.get("title"),
                     "location_detail": f"업무시스템 화면: {data.get('screen_path', '-')} "
                                        f"(유형: {data.get('record_type', '-')})",
                     "allowed_users": data.get("allowed_users"),

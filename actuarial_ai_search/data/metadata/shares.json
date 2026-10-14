@@ -1,0 +1,8 @@
+{
+  "notice": "가상 공유폴더 등록부입니다. unc_root 는 화면에 표시되는 원본 UNC 경로(예약 도메인 .invalid, 실제 접속 불가)이고, local_dir 은 data/shared_folder 아래의 가상 폴더입니다. 실제 SMB 접속은 구현되어 있지 않습니다.",
+  "shares": [
+    {"name": "계리평가 공유", "unc_root": "\\\\fs-actu01.example.invalid\\계리평가", "local_dir": "계리평가", "enabled": true},
+    {"name": "재무팀 공유", "unc_root": "\\\\fs-fin01.example.invalid\\재무공유", "local_dir": "재무공유", "enabled": true},
+    {"name": "관리자 전용", "unc_root": "\\\\fs-adm01.example.invalid\\관리", "local_dir": "관리", "enabled": true}
+  ]
+}

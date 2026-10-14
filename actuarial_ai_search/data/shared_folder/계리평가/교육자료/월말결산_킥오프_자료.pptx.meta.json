@@ -1,0 +1,14 @@
+{
+  "allowed_users": [],
+  "version": "1.0",
+  "department": "계리평가팀",
+  "doc_id": "SF-103",
+  "title": "월말 결산 킥오프 자료",
+  "category": "결산",
+  "created_at": "2026-09-28",
+  "modified_at": "2026-10-02",
+  "allowed_groups": [
+    "actuarial",
+    "finance"
+  ]
+}

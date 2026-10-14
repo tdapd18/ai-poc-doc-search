@@ -6,7 +6,6 @@ version: 2.1
 created_at: 2025-03-10
 modified_at: 2026-09-03
 department: 계리평가팀
-location: smb://fileserver.example.invalid/actuarial/결산검증/IFRS17_결산검증가이드.md
 allowed_users: []
 allowed_groups: [actuarial, finance]
 ---

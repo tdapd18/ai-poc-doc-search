@@ -1,0 +1,14 @@
+{
+  "allowed_users": [],
+  "version": "1.0",
+  "department": "계리평가팀",
+  "doc_id": "SF-101",
+  "title": "결산 내부통제 점검 보고서 (2026년 9월)",
+  "category": "결산",
+  "created_at": "2026-10-07",
+  "modified_at": "2026-10-08",
+  "allowed_groups": [
+    "actuarial",
+    "finance"
+  ]
+}

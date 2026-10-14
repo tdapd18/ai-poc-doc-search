@@ -45,6 +45,7 @@ class Citation:
     flagged: bool = False
     flag_reason: str = ""
     content_hash: str = ""
+    loc: str = ""
 
 
 @dataclass
@@ -73,14 +74,14 @@ class AnswerGenerator:
             doc = self.indexer.get_document(r.doc_id)
             if doc is None or not self.access.can_access(user, doc):
                 continue  # 검색 이후 삭제/권한 회수
-            if doc.content_hash() != r.content_hash:
+            if self.indexer.content_hash_of(doc.doc_id) != r.content_hash:
                 continue  # 검색 이후 내용 변경 → 오래된 근거 사용 금지
             for p in r.passages:
                 cites.append(Citation(
                     number=len(cites) + 1, doc_id=doc.doc_id, title=doc.title, source_system=doc.source_system,
                     version=doc.version, modified_at=doc.modified_at, location=doc.location,
                     location_detail=doc.location_detail, chunk_seq=p.chunk_seq, heading=p.heading, text=p.text,
-                    flagged=p.flagged, flag_reason=p.flag_reason, content_hash=r.content_hash))
+                    flagged=p.flagged, flag_reason=p.flag_reason, content_hash=r.content_hash, loc=p.loc))
                 if len(cites) >= limit:
                     return cites
         return cites

@@ -14,6 +14,9 @@ import pytest
 from core.services import build_services
 
 PROJECT = Path(__file__).resolve().parent
+# 가상 데이터 기준 사용자별 접근 가능 문서
+FINANCE_DOCS = {"SF-001", "GW-002", "BS-002", "SF-101", "SF-103", "SF-201", "SF-202"}
+ACTUARY_COUNT, FINANCE_COUNT, ADMIN_COUNT, TOTAL_DOCS = 13, 7, 15, 15
 _RECORDS: list[dict] = []
 _ACTUAL: dict[str, str] = {}
 
@@ -26,7 +29,7 @@ def pytest_addoption(parser):
 def rec(request):
     """실제 결과를 기록한다: rec('검색 결과 GW-001, BS-001')"""
     def _rec(text: str) -> None:
-        _ACTUAL[request.node.nodeid] = text
+        _ACTUAL[request.node.nodeid] = str(text)
     return _rec
 
 
@@ -40,7 +43,9 @@ def pytest_runtest_makereport(item, call):
         exp = re.search(r"예상결과:\s*(.+)", doc)
         actual = _ACTUAL.get(item.nodeid, "")
         if report.outcome != "passed":
-            actual = "실패: " + (str(call.excinfo.value).splitlines()[0][:150] if call.excinfo else "setup 오류")
+            lines = str(call.excinfo.value).splitlines() if call and call.excinfo else []
+            actual = "실패: " + ((lines[0] if lines else repr(call.excinfo.value))[:150] if call and call.excinfo
+                               else "setup 오류")
         elif not actual:
             actual = "예상 결과와 일치"
         _RECORDS.append({
@@ -93,3 +98,21 @@ def users(svc):
         "finance": svc.access.get_user("u_finance"),
         "admin": svc.access.get_user("u_admin"),
     }
+
+
+@pytest.fixture
+def app(tmp_path, monkeypatch):
+    """Streamlit AppTest 로 구동한 앱 + 임시 데이터 폴더 (브라우저 없이 화면 동작을 검증)."""
+    pytest.importorskip("streamlit.testing.v1")
+    data = tmp_path / "data"
+    shutil.copytree(PROJECT / "data", data)
+    monkeypatch.setenv("DATA_DIR", str(data))
+    monkeypatch.setenv("INDEX_DB_PATH", str(tmp_path / "idx.db"))
+    monkeypatch.setenv("LLM_PROVIDER", "none")
+    monkeypatch.chdir(PROJECT)
+    import streamlit
+    from streamlit.testing.v1 import AppTest
+    streamlit.cache_resource.clear()
+    at = AppTest.from_file(str(PROJECT / "app.py"), default_timeout=60).run()
+    assert not at.exception
+    return at, data

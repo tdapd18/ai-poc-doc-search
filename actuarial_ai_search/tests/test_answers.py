@@ -1,5 +1,6 @@
 import logging
 
+from conftest import FINANCE_DOCS
 from core.answer_generator import AnswerGenerator, INSUFFICIENT_TEXT
 from core.document_parser import detect_injection, split_chunks
 from core.llm_client import DisabledLLMClient, InternalLLMClient, MockLLMClient, SYSTEM_INSTRUCTION
@@ -68,10 +69,10 @@ def test_unauthorized_docs_never_reach_llm(svc, users, rec):
     """입력조건: 관리자 권한으로 검색한 결과를 재무팀 사용자 권한으로 AI 답변 생성에 사용 시도
     예상결과: 재무팀 권한 밖 문서는 모델 입력에 포함되지 않음"""
     admin_resp = svc.engine.search(users["admin"], "결산 검증 예외 승인 내역 모델 실행 오류")
-    assert {r.doc_id for r in admin_resp.results} - {"SF-001", "GW-002", "BS-002"}
+    assert {r.doc_id for r in admin_resp.results} - FINANCE_DOCS
     llm = MockLLMClient()
     a, _ = _ans(svc, users["finance"], llm, q="결산 검증 예외 승인 내역 모델 실행 오류", response=admin_resp)
-    allowed = {"SF-001", "GW-002", "BS-002"}
+    allowed = FINANCE_DOCS
     assert {c.doc_id for c in a.citations} <= allowed
     if llm.last_request:
         titles = {e.title for e in llm.last_request.evidences}
@@ -84,7 +85,7 @@ def test_revoked_between_search_and_answer(svc, users, data_copy):
     예상결과: 오래된 검색 결과를 근거로 쓰지 않음(근거 0건)"""
     resp = svc.engine.search(users["finance"], "IFRS17 결산 검증 절차")
     assert resp.results
-    p = data_copy / "shared_folder" / "결산검증" / "IFRS17_결산검증가이드.md"
+    p = data_copy / "shared_folder" / "계리평가" / "결산검증" / "IFRS17_결산검증가이드.md"
     p.write_text(p.read_text(encoding="utf-8").replace("allowed_groups: [actuarial, finance]",
                                                        "allowed_groups: [actuarial]"), encoding="utf-8")
     svc.sync.sync()

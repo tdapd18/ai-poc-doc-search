@@ -16,8 +16,10 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
-from core.document_parser import split_chunks
+from core.document_parser import detect_injection, split_chunks
 from core.models import Chunk, Document
+
+SCHEMA_VERSION = "3"  # 색인은 원본에서 다시 만들 수 있는 파생 데이터이므로, 버전이 다르면 비우고 다시 만든다.
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -27,12 +29,13 @@ CREATE TABLE IF NOT EXISTS documents (
     department TEXT NOT NULL, location TEXT NOT NULL, location_detail TEXT NOT NULL DEFAULT '',
     attachments_json TEXT NOT NULL DEFAULT '[]', allowed_users_json TEXT NOT NULL DEFAULT '[]',
     allowed_groups_json TEXT NOT NULL DEFAULT '[]', body TEXT NOT NULL,
+    file_type TEXT NOT NULL DEFAULT 'md', file_name TEXT NOT NULL DEFAULT '', share TEXT NOT NULL DEFAULT '',
     content_hash TEXT NOT NULL, acl_hash TEXT NOT NULL, indexed_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS chunks (
     id INTEGER PRIMARY KEY AUTOINCREMENT, doc_id TEXT NOT NULL REFERENCES documents(doc_id) ON DELETE CASCADE,
     seq INTEGER NOT NULL, heading TEXT NOT NULL, text TEXT NOT NULL,
-    flagged INTEGER NOT NULL DEFAULT 0, flag_reason TEXT NOT NULL DEFAULT ''
+    flagged INTEGER NOT NULL DEFAULT 0, flag_reason TEXT NOT NULL DEFAULT '', loc TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(doc_id);
 CREATE TABLE IF NOT EXISTS source_status (
@@ -53,8 +56,21 @@ class Indexer:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._memory_conn = sqlite3.connect(":memory:") if str(self.db_path) == ":memory:" else None
         with self._conn() as c:
+            self._migrate(c)
             c.executescript(_SCHEMA)
             c.execute("INSERT OR IGNORE INTO meta(key, value) VALUES('index_generation', '0')")
+            c.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?)", (SCHEMA_VERSION,))
+
+    @staticmethod
+    def _migrate(c: sqlite3.Connection) -> None:
+        has_meta = c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='meta'").fetchone()
+        current = None
+        if has_meta:
+            row = c.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+            current = row[0] if row else None
+        if has_meta and current != SCHEMA_VERSION:
+            for table in ("chunks", "documents", "source_status", "meta"):
+                c.execute(f"DROP TABLE IF EXISTS {table}")
 
     @contextmanager
     def _conn(self):
@@ -103,20 +119,31 @@ class Indexer:
             for d in upserts:
                 c.execute("DELETE FROM documents WHERE doc_id=?", (d.doc_id,))  # chunks 는 CASCADE
                 c.execute(
-                    "INSERT INTO documents VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "INSERT INTO documents (doc_id, title, source_key, source_system, category, version, created_at,"
+                    " modified_at, department, location, location_detail, attachments_json, allowed_users_json,"
+                    " allowed_groups_json, body, file_type, file_name, share, content_hash, acl_hash, indexed_at)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (d.doc_id, d.title, d.source_key, d.source_system, d.category, d.version, d.created_at,
                      d.modified_at, d.department, d.location, d.location_detail,
                      json.dumps(list(d.attachments), ensure_ascii=False),
                      json.dumps(list(d.allowed_users), ensure_ascii=False),
                      json.dumps(list(d.allowed_groups), ensure_ascii=False),
-                     d.body, d.content_hash(), d.acl_hash(), _now()),
+                     d.body, d.file_type, d.file_name, d.share, d.content_hash(), d.acl_hash(), _now()),
                 )
-                for ch in split_chunks(d.title, d.body):
+                for seq, (heading, loc, text) in enumerate(self._segments(d)):
+                    reason = detect_injection(text)
                     c.execute(
-                        "INSERT INTO chunks(doc_id, seq, heading, text, flagged, flag_reason) VALUES (?,?,?,?,?,?)",
-                        (d.doc_id, ch.seq, ch.heading, ch.text, int(ch.flagged), ch.flag_reason),
+                        "INSERT INTO chunks(doc_id, seq, heading, text, flagged, flag_reason, loc) VALUES (?,?,?,?,?,?,?)",
+                        (d.doc_id, seq, heading, text, int(bool(reason)), reason, loc),
                     )
             self._bump(c)
+
+    @staticmethod
+    def _segments(d: Document) -> list[tuple[str, str, str]]:
+        """형식별 위치가 보존된 조각(segments)을 우선 사용하고, 없으면 본문을 문단으로 나눈다."""
+        if d.segments:
+            return [(h, loc or f"§ {h}", t) for h, loc, t in d.segments]
+        return [(c.heading, c.loc or f"§ {c.heading}", c.text) for c in split_chunks(d.title, d.body)]
 
     def set_source_status(self, source_key: str, label: str, ok: bool, message: str = "") -> None:
         with self._conn() as c:
@@ -148,6 +175,7 @@ class Indexer:
             allowed_users=tuple(json.loads(r["allowed_users_json"])),
             allowed_groups=tuple(json.loads(r["allowed_groups_json"])),
             location_detail=r["location_detail"], attachments=tuple(json.loads(r["attachments_json"])),
+            file_type=r["file_type"], file_name=r["file_name"], share=r["share"],
         )
 
     def get_document(self, doc_id: str) -> Document | None:
@@ -172,7 +200,7 @@ class Indexer:
     def get_chunks(self, doc_id: str) -> list[Chunk]:
         with self._conn() as c:
             rows = c.execute("SELECT * FROM chunks WHERE doc_id=? ORDER BY seq", (doc_id,)).fetchall()
-        return [Chunk(r["seq"], r["heading"], r["text"], bool(r["flagged"]), r["flag_reason"]) for r in rows]
+        return [Chunk(r["seq"], r["heading"], r["text"], bool(r["flagged"]), r["flag_reason"], r["loc"]) for r in rows]
 
     def count_documents(self) -> int:
         with self._conn() as c:
