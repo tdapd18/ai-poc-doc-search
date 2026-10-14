@@ -23,6 +23,7 @@ actuarial_ai_search/
 │   ├── DESIGN.md          # 설계, 점수 규칙, 보안 설계, 사내망 연동 시 추가 필요사항
 │   └── TEST_RESULTS.md    # 자동 테스트 결과표 (입력조건 / 예상 / 실제 / 통과)
 ├── tools/make_sample_files.py  # 샘플 PDF/Excel/PPT 생성기 (개발 전용, requirements-dev.txt 필요)
+├── tools/build_web_demo.py     # 정적 웹 시연판(HTML) 생성기 — data/ 에서 tools/web_demo_template.html 로 빌드
 ├── connectors/            # 저장소별 Connector (공통 인터페이스 base.py)
 │   ├── base.py  shared_folder.py  groupware.py  business_system.py
 ├── core/

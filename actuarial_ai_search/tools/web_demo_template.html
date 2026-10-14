@@ -1,0 +1,273 @@
+<title>계리 업무자료 통합검색</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap">
+<style>
+/* Layout: 3-column workbench (scope & filters | results | source preview); stacks to one column below 1100px */
+:root{--bg:#f4f6f9;--panel:#fff;--fg:#1b2430;--muted:#5a6573;--line:#d9dfe8;--navy:#1f3a5f;--navy-fg:#fff;
+--soft:#eef3fa;--mark:#ffe58f;--sel:#fff9e6;--selline:#c9a227;--warn-bg:#fff6e5;--warn-fg:#7a4e00;--warn-line:#f0d49a;
+--bad-bg:#fdf0ee;--bad-fg:#a12622;--sf:#e3eaf4;--sf-fg:#1f3a5f;--gw:#e3f1ec;--gw-fg:#17624a;--bs:#efe8f6;--bs-fg:#5b2e7a;--chip:#eceff3;
+--pdf:#fbe4e1;--pdf-fg:#a12622;--xls:#e1f2e6;--xls-fg:#1b6b35;--ppt:#fcebdc;--ppt-fg:#9a4a0b;--txt:#e9ecf1;--txt-fg:#3c4655;
+--font:'Noto Sans KR',system-ui,-apple-system,'Malgun Gothic',sans-serif;--mono:Consolas,'SF Mono',monospace}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#10161f;--panel:#18212d;--fg:#e4e9f0;--muted:#9aa6b6;--line:#2c3848;--navy:#7fa6dc;--navy-fg:#0f1722;
+--soft:#1c2a3d;--mark:#6b5a12;--sel:#2e2a14;--selline:#d6b640;--warn-bg:#33290f;--warn-fg:#f0cf8a;--warn-line:#5a4a1c;
+--bad-bg:#35201f;--bad-fg:#f1a29d;--sf:#233248;--sf-fg:#a9c4ea;--gw:#1c3a31;--gw-fg:#8fd3b9;--bs:#32254a;--bs-fg:#cdb0ec;--chip:#243040;
+--pdf:#3a2220;--pdf-fg:#f1a29d;--xls:#1b3526;--xls-fg:#8fd3a8;--ppt:#3a2b1c;--ppt-fg:#f0b98a;--txt:#262f3c;--txt-fg:#b6c0ce;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#10161f;--panel:#18212d;--fg:#e4e9f0;--muted:#9aa6b6;--line:#2c3848;--navy:#7fa6dc;--navy-fg:#0f1722;
+--soft:#1c2a3d;--mark:#6b5a12;--sel:#2e2a14;--selline:#d6b640;--warn-bg:#33290f;--warn-fg:#f0cf8a;--warn-line:#5a4a1c;
+--bad-bg:#35201f;--bad-fg:#f1a29d;--sf:#233248;--sf-fg:#a9c4ea;--gw:#1c3a31;--gw-fg:#8fd3b9;--bs:#32254a;--bs-fg:#cdb0ec;--chip:#243040;
+--pdf:#3a2220;--pdf-fg:#f1a29d;--xls:#1b3526;--xls-fg:#8fd3a8;--ppt:#3a2b1c;--ppt-fg:#f0b98a;--txt:#262f3c;--txt-fg:#b6c0ce;color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--font);font-size:15px;line-height:1.6}
+.wrap{max-width:1760px;margin:0 auto;padding-block:20px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+header.top{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:baseline;margin-bottom:12px}
+h1{font-size:1.45rem;margin:0;color:var(--navy);text-wrap:balance}
+.sub{color:var(--muted);font-size:13.5px;margin:0}
+.demo-note{background:var(--soft);border:1px solid var(--line);border-radius:6px;padding:8px 12px;font-size:13px;margin-bottom:14px}
+.grid{display:grid;grid-template-columns:minmax(250px,1fr) minmax(0,2.2fr) minmax(300px,1.45fr);gap:22px;align-items:start}
+@media(max-width:1100px){.grid{grid-template-columns:minmax(0,1fr)}}
+.col{min-width:0}
+h2{font-size:1rem;color:var(--navy);border-bottom:2px solid var(--navy);padding-bottom:5px;margin:0 0 12px}
+h3{font-size:.95rem;margin:16px 0 8px;color:var(--navy)}
+label.f{display:block;font-size:13px;color:var(--muted);margin:12px 0 4px}
+select,input[type=text],input[type=date]{width:100%;font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--fg)}
+button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:6px;padding:6px 12px}
+button:hover{border-color:var(--navy)} button:disabled{opacity:.5;cursor:default}
+button.primary{background:var(--navy);color:var(--navy-fg);border-color:var(--navy);font-weight:700}
+button.sm{padding:3px 9px;font-size:13px}
+:focus-visible{outline:2px solid var(--navy);outline-offset:2px}
+.warnbox{background:var(--warn-bg);border:1px solid var(--warn-line);color:var(--warn-fg);padding:8px 11px;border-radius:6px;font-size:12.5px;margin:8px 0}
+.notice{background:var(--soft);border:1px solid var(--line);padding:8px 12px;border-radius:6px;font-size:13.5px;margin:8px 0}
+.badge{display:inline-block;padding:1px 9px;border-radius:10px;font-size:12px;font-weight:700;margin-right:5px;white-space:nowrap}
+.b-sf{background:var(--sf);color:var(--sf-fg)}.b-gw{background:var(--gw);color:var(--gw-fg)}.b-bs{background:var(--bs);color:var(--bs-fg)}
+.b-cat{background:var(--chip);color:var(--muted)}.b-bad{background:var(--bad-bg);color:var(--bad-fg)}.b-ok{background:var(--gw);color:var(--gw-fg)}
+.b-pdf{background:var(--pdf);color:var(--pdf-fg)}.b-xls{background:var(--xls);color:var(--xls-fg)}.b-ppt{background:var(--ppt);color:var(--ppt-fg)}.b-txt{background:var(--txt);color:var(--txt-fg)}
+.stat{font-size:2rem;font-weight:700;color:var(--navy);line-height:1.1;font-variant-numeric:tabular-nums}
+.src-row{display:flex;flex-wrap:wrap;gap:4px 6px;align-items:center;margin:6px 0;font-size:13.5px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips label{display:inline-flex;gap:5px;align-items:center;border:1px solid var(--line);border-radius:14px;padding:2px 10px;font-size:13px;background:var(--panel);cursor:pointer}
+.chips label:has(input:checked){background:var(--soft);border-color:var(--navy);font-weight:700}
+.row2{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:end}.row2>*{min-width:0}
+.meta{color:var(--muted);font-size:12.5px;margin:2px 0}
+form.q{display:flex;gap:8px;flex-wrap:wrap}form.q input{flex:1 1 260px}
+.sug{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}.sug button{font-size:13px;padding:4px 10px}
+.opts{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;font-size:13.5px;margin:10px 0}
+.opts select{width:auto}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:10px 0}
+.card.cur{border-color:var(--navy)}
+.rtitle{font-size:16px;font-weight:700;color:var(--navy);overflow-wrap:anywhere}
+.path{font-family:var(--mono);font-size:12.5px;background:var(--chip);padding:2px 7px;border-radius:4px;overflow-wrap:anywhere;display:inline-block;max-width:100%}
+.hit{display:flex;gap:8px;align-items:flex-start;background:var(--soft);border-left:4px solid var(--navy);padding:6px 10px;border-radius:4px;margin:6px 0;font-size:14px}
+.hit>div{flex:1;min-width:0;overflow-wrap:anywhere}
+.hit.sel{background:var(--sel);border-left-color:var(--selline)}.hit.flag{background:var(--bad-bg);border-left-color:var(--bad-fg)}
+.loc{display:inline-block;font-weight:700;color:var(--navy);background:var(--sf);border-radius:4px;padding:0 7px;margin-right:8px;font-size:12.5px}
+.passage{background:var(--soft);border-left:4px solid var(--navy);padding:8px 12px;border-radius:4px;margin:8px 0;font-size:14.5px;white-space:pre-wrap;overflow-wrap:anywhere}
+.passage.sel{background:var(--sel);border-left-color:var(--selline)}.passage.flag{background:var(--bad-bg);border-left-color:var(--bad-fg)}.passage.dim{opacity:.75}
+.passage .loc{display:block;background:none;padding:0;margin:0 0 2px}
+mark{background:var(--mark);color:inherit;padding:0 2px;border-radius:2px}
+.codebox{display:flex;gap:8px;align-items:flex-start}
+.codebox code{flex:1;min-width:0;font-family:var(--mono);font-size:12.5px;background:var(--chip);padding:6px 8px;border-radius:4px;overflow-wrap:anywhere}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:13.5px;margin:8px 0}.kv dt{color:var(--muted)}.kv dd{margin:0;overflow-wrap:anywhere}
+.nav{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.hist details{border:1px solid var(--line);border-radius:6px;padding:6px 10px;margin:6px 0;background:var(--panel);font-size:13.5px}
+.empty{color:var(--muted);font-size:14px}
+.toast{font-size:12.5px;color:var(--gw-fg);margin-left:6px}
+</style>
+<div class="wrap">
+<header class="top"><h1>🔎 계리 업무자료 AI 통합검색</h1><p class="sub">여러 공유폴더(UNC) · 그룹웨어 · 업무시스템의 가상 자료를 한 번에 검색하고 일치 위치와 원본 경로를 확인합니다</p></header>
+<div class="demo-note"><b>교육용 PoC 웹 시연판.</b> 모든 자료는 직접 만든 가상 더미데이터이며 실제 사내 시스템·외부 API에 연결되지 않습니다(UNC 경로는 예약 도메인 .invalid 의 표시용 값입니다). Python/Streamlit 앱의 검색·점수·권한·필터 규칙을 브라우저에서 재현한 정적 시연판이라 색인 갱신, 공유폴더 등록, 파일 변경 감지는 포함하지 않습니다. 실제 생성형 AI는 연결되어 있지 않습니다.</div>
+<div class="grid">
+<aside class="col" aria-label="검색 범위 및 필터">
+ <h2>검색 범위 및 필터</h2>
+ <label class="f" for="user">가상 사용자 선택</label><select id="user"></select>
+ <div class="warnbox">⚠ 교육용 <b>가상 사용자</b> 전환입니다. 실제 회사 인증(SSO/AD)이 아니며 운영 시에는 사내 인증과 원본 시스템 ACL 연동이 필요합니다.</div>
+ <div class="meta">접근 가능한 통합 문서 수</div><div class="stat" id="count">0</div>
+ <h3>위치 (선택 없으면 전체)</h3><div class="chips" id="fLoc"></div>
+ <h3>문서 유형</h3><div class="chips" id="fType"></div>
+ <h3>문서 분류</h3><div class="chips" id="fCat"></div>
+ <h3>수정일</h3>
+ <div class="chips" id="fDate"></div>
+ <div class="row2" id="dateCustom" hidden style="margin-top:8px"><div><label class="f" for="d1" style="margin-top:0">시작</label><input type="date" id="d1"></div><div><label class="f" for="d2" style="margin-top:0">끝</label><input type="date" id="d2"></div></div>
+ <div class="meta" id="dateNote"></div>
+ <p><button id="reset" type="button">필터 초기화</button></p>
+ <h3>연결된 저장소</h3><div id="sources"></div>
+ <label class="meta" style="display:block;margin-top:14px"><input type="checkbox" id="revoke"> 권한 변경 시연: <b>IFRS17 결산 검증 가이드</b>의 재무팀 권한 회수</label>
+</aside>
+<main class="col" aria-label="검색 결과">
+ <h2>검색 결과</h2>
+ <form class="q" id="qform"><input type="text" id="q" placeholder="예) E101 오류 조치  /  결산 일정  /  RAFM 모델 실행 오류가 나면?" aria-label="검색어 또는 질문"><button class="primary" type="submit">검색</button></form>
+ <div class="opts">
+  <span>검색 대상</span>
+  <label><input type="radio" name="scope" value="all" checked> 파일명 + 본문</label><label><input type="radio" name="scope" value="name"> 파일명만</label><label><input type="radio" name="scope" value="body"> 본문만</label>
+  <label>정렬 <select id="sort"><option value="relevance">관련도</option><option value="modified">수정일</option><option value="name">파일명</option><option value="type">형식</option><option value="path">경로</option></select></label>
+  <label><input type="checkbox" id="desc" checked> 내림차순</label>
+  <label>결과 수 <select id="topk"><option>5</option><option>10</option><option>20</option></select></label>
+ </div>
+ <div class="sug" id="sug"></div>
+ <div class="opts"><label><input type="checkbox" id="aimode"> AI 답변 모드 (선택)</label><label><input type="checkbox" id="mock"> Mock LLM 사용 (구조 테스트용 · 실제 생성형 AI 아님)</label><span class="meta">실제 생성형 AI 연결: <b>미연결</b></span></div>
+ <div id="result"></div>
+ <h3>이전 검색 내역</h3><div class="hist" id="hist"><span class="empty">이전 검색이 없습니다.</span></div>
+</main>
+<aside class="col" aria-label="관련 원문 미리보기">
+ <h2>관련 원문 미리보기</h2><div id="preview"><div class="notice">검색 결과의 <b>위치 열기</b> 또는 <b>문서 미리보기</b>를 선택하면 일치 단어가 강조된 원문이 여기에 표시됩니다.</div></div>
+</aside>
+</div></div>
+<script>
+const DATA=__DATA__;
+const DOCS=DATA.docs,DICT=DATA.dict,USERS=DATA.users;
+const CATS=["IFRS17","RAFM","결산","기타"],TYPES=[["pdf","PDF","pdf"],["xlsx","Excel","xls"],["pptx","PowerPoint","ppt"],["md","Markdown","txt"],["txt","텍스트","txt"],["post","게시글","gw"],["record","업무시스템 레코드","bs"]];
+const TSHORT={pdf:"PDF",xlsx:"XLSX",pptx:"PPTX",md:"MD",txt:"TXT",post:"게시글",record:"레코드"},TKIND=Object.fromEntries(TYPES.map(t=>[t[0],t[2]]));
+const SKIND={shared_folder:"sf",groupware:"gw",business_system:"bs"};
+const PRESETS=["전체","최근 7일","최근 30일","최근 90일","직접 지정"];
+const SUG=["E101 오류 조치","RAFM 모델 실행 오류가 나면 어떻게 대응하나요?","GoC 단위 변동 분석은 어떻게 하나요?","월말 결산 일정과 마감 시한은?","CSM 변동률 기준","휴가 규정의 육아휴직 수당은?"];
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const badge=(t,k)=>`<span class="badge b-${k}">${esc(t)}</span>`;
+const tb=t=>badge(TSHORT[t]||t.toUpperCase(),TKIND[t]||"txt");
+const S={user:USERS[0].user_id,cats:[],types:[],locs:[],preset:"전체",scope:"all",sort:"relevance",desc:true,topk:5,last:null,sel:null,hist:[],only:false};
+/* ---- 권한 ---- */
+const groupsOf=d=>(d.id==="SF-001"&&$("revoke").checked)?["actuarial"]:d.groups;
+const can=(u,d)=>!!u&&(u.role==="admin"||d.users.includes(u.user_id)||groupsOf(d).some(g=>u.groups.includes(g)));
+const curUser=()=>USERS.find(u=>u.user_id===S.user);
+const visible=()=>DOCS.filter(d=>can(curUser(),d));
+/* ---- 질의 분석 (core/text_utils.py 와 같은 규칙) ---- */
+const aliases=Object.entries(DICT.alias_normalization).map(([k,v])=>[k.toLowerCase(),v.toLowerCase()]).sort((a,b)=>b[0].length-a[0].length);
+const stop=new Set(DICT.stopwords.map(s=>s.toLowerCase())),generic=new Set(DICT.generic_terms.map(s=>s.toLowerCase()));
+const groupOf={};DICT.synonym_groups.forEach(g=>{const gg=[...new Set(g.map(t=>t.toLowerCase()))];gg.forEach(t=>groupOf[t]=gg)});
+const SUF=["에서는","으로는","이라고","입니다","인가요","일까요","할까요","하나요","되나요","하면","하는","해야","했을","했나","됩니다","되면","되는","에서","으로","에는","에도","부터","까지","에게","한테","은","는","이","가","을","를","의","에","로","와","과","도","만","할","한","해","하고"].sort((a,b)=>b.length-a.length);
+const norm=t=>{let o=t.toLowerCase();for(const[a,b]of aliases)if(o.includes(a))o=o.split(a).join(b);return o.replace(/[ \t]+/g," ")};
+const strip=t=>{if(!/^[가-힣]+$/.test(t))return t;for(const s of SUF)if(t.endsWith(s)&&t.length-s.length>=2)return t.slice(0,-s.length);return t};
+function analyze(raw){const n=norm(raw),tokens=[];for(let t of (n.match(/[0-9a-z]+|[가-힣]+/g)||[])){t=strip(t);if(t.length<2||stop.has(t))continue;tokens.push(t)}
+ const concepts=[],seen=new Set();for(const t of new Set(tokens)){
+  if(generic.has(t)){concepts.push({term:t,variants:[[t,.3]],generic:true});continue}
+  const g=groupOf[t]||[t],key=g.join("|");if(seen.has(key))continue;seen.add(key);
+  concepts.push({term:t,variants:[[t,1],...g.filter(s=>s!==t).map(s=>[s,.6])],generic:false})}
+ return{normalized:n,tokens,concepts}}
+/* ---- 점수 (core/search_engine.py 와 같은 규칙) ---- */
+const cnt=(t,s)=>s?t.split(s).length-1:0;
+function best(c,text){let b=[0,0,""];for(const[t,w]of c.variants){const n=cnt(text,t);if(n&&w>b[0])b=[w,n,t]}return b}
+function chunkScores(d,a,th){const cs=a.concepts,core=cs.filter(c=>!c.generic).length?cs.filter(c=>!c.generic):cs,out=[];
+ for(const ch of d.chunks){const text=norm(ch.t),head=norm(ch.h);let raw=0;const hit=new Set(),terms=[];
+  for(const c of cs){const[wb,nb,tb_]=best(c,text),[wh,nh,thh]=best(c,head);
+   if(nb){raw+=wb*Math.min(nb,3);terms.push(tb_)}if(nh){raw+=3*wh;terms.push(thh)}
+   if(nb||nh||th.has(c.term))hit.add(c.term)}
+  for(let i=0;i<a.tokens.length-1;i++)if(text.includes(a.tokens[i]+" "+a.tokens[i+1]))raw+=1.5;
+  if(raw>0){const cov=core.filter(c=>hit.has(c.term)).length/core.length;out.push([raw*(.5+.5*cov),ch,[...new Set(terms)],hit])}}
+ return out}
+function scoreDoc(d,a,scope){const cs=a.concepts,core=cs.filter(c=>!c.generic).length?cs.filter(c=>!c.generic):cs;
+ let ts=0;const th=new Set();
+ if(scope!=="body"){const nt=norm(d.title+" "+d.fileName);for(const c of cs){const[w,n]=best(c,nt);if(n){ts+=5*w;th.add(c.term)}}}
+ const dh=new Set(th);let list=[];
+ if(scope!=="name"){list=chunkScores(d,a,th);list.forEach(x=>x[3].forEach(k=>dh.add(k)))}
+ const dcov=core.filter(c=>dh.has(c.term)).length/core.length;list.sort((x,y)=>y[0]-x[0]||x[1].seq-y[1].seq);
+ const score=ts+(list[0]?list[0][0]:0)+.25*list.slice(1,4).reduce((s,x)=>s+x[0],0);
+ if(dcov<.5||score<1)return null;
+ return{doc:d,score:Math.round(score*10)/10,hits:list.length,nameMatch:th.size>0,passages:list.slice(0,3).map(([s,ch,t])=>({seq:ch.seq,h:ch.h,loc:ch.loc,t:ch.t,f:ch.f,fr:ch.fr,terms:t}))}}
+function bounds(vis){const p=S.preset;if(p==="전체")return[null,null];
+ if(p==="직접 지정")return[$("d1").value||null,$("d2").value||null];
+ const ref=new Date(vis.reduce((m,d)=>d.mod>m?d.mod:m,"0000-00-00")+"T00:00:00Z"),days={"최근 7일":7,"최근 30일":30,"최근 90일":90}[p];
+ return[new Date(ref-days*864e5).toISOString().slice(0,10),ref.toISOString().slice(0,10)]}
+function filtered(docs,vis){const[f,t]=bounds(vis);
+ return docs.filter(d=>(!S.cats.length||S.cats.includes(d.cat))&&(!S.types.length||S.types.includes(d.type))&&(!S.locs.length||S.locs.includes(d.locKey))&&(!f||d.mod>=f)&&(!t||d.mod<=t))}
+const sortKeys={modified:r=>r.doc.mod,name:r=>(r.doc.fileName||r.doc.title).toLowerCase(),type:r=>r.doc.type,path:r=>r.doc.loc.toLowerCase()};
+function sortRes(r){if(S.sort==="relevance"){r.sort((x,y)=>y.score-x.score||(y.doc.mod>x.doc.mod?1:y.doc.mod<x.doc.mod?-1:0)||(x.doc.id>y.doc.id?1:-1));return S.desc?r:r.reverse()}
+ const k=sortKeys[S.sort];r.sort((x,y)=>(k(x)>k(y)?1:k(x)<k(y)?-1:(x.doc.id>y.doc.id?1:-1)));return S.desc?r.reverse():r}
+function search(q){if(!q.trim())return{status:"empty"};const vis=visible(),docs=filtered(vis,vis),a=analyze(q);
+ if(!a.concepts.length)return{status:"none",a};
+ const r=sortRes(docs.map(d=>scoreDoc(d,a,S.scope)).filter(Boolean));
+ return r.length?{status:"ok",a,results:r.slice(0,S.topk),total:r.length}:{status:"none",a}}
+function matches(doc,q){if(!q)return[];const a=analyze(q);if(!a.concepts.length)return[];return chunkScores(doc,a,new Set()).map(x=>x[1]).sort((x,y)=>x.seq-y.seq)}
+/* ---- 발췌/강조 ---- */
+function terms(a){return a?a.concepts.flatMap(c=>c.variants.map(v=>v[0])):[]}
+function hl(text,ts){let o=esc(text);const u=[...new Set(ts.filter(t=>t.length>=2).map(esc))].sort((a,b)=>b.length-a.length);
+ if(u.length)o=o.replace(new RegExp(u.map(t=>t.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|"),"gi"),m=>`<mark>${m}</mark>`);return o}
+function snippet(text,ts,b=45,a=140){const f=text.trim().replace(/\s*\n\s*/g," ⏎ "),u=ts.filter(t=>t.length>=2);let i=-1;
+ if(u.length){const m=f.match(new RegExp(u.map(t=>t.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).sort((x,y)=>y.length-x.length).join("|"),"i"));if(m)i=m.index}
+ if(i<0)return f.slice(0,b+a)+(f.length>b+a?"…":"");const s=Math.max(0,i-b),e=Math.min(f.length,i+a);return(s>0?"…":"")+f.slice(s,e)+(e<f.length?"…":"")}
+/* ---- 답변(로컬/Mock) ---- */
+const firstSentence=t=>{const f=t.replace(/[|#>*`\-]+/g," ").replace(/\s+/g," ").trim();const m=f.match(/(.{15,160}?[.다요])(\s|$)/);return(m?m[1]:f.slice(0,120)).trim()};
+function cites(res){const c=[];for(const r of res.results)for(const p of r.passages){c.push({n:c.length+1,doc:r.doc,...p});if(c.length>=6)return c}return c}
+/* ---- 렌더 ---- */
+function checks(el,items,key,sel){el.innerHTML=items.map(([v,l])=>`<label><input type="checkbox" data-k="${key}" value="${esc(v)}"${sel.includes(v)?" checked":""}>${esc(l)}</label>`).join("")}
+function renderLeft(){const v=visible();$("count").textContent=v.length;
+ const locs={};v.forEach(d=>{const l=d.src==="shared_folder"&&d.share?"공유폴더 · "+d.share:d.srcLabel;locs[d.locKey]=[l,(locs[d.locKey]?locs[d.locKey][1]:0)+1]});
+ S.locs=S.locs.filter(k=>locs[k]);checks($("fLoc"),Object.entries(locs).sort().map(([k,[l,n]])=>[k,`${l} (${n})`]),"locs",S.locs);
+ const tc={};v.forEach(d=>tc[d.type]=(tc[d.type]||0)+1);S.types=S.types.filter(t=>tc[t]);
+ checks($("fType"),TYPES.filter(t=>tc[t[0]]).map(t=>[t[0],`${t[1]} (${tc[t[0]]})`]),"types",S.types);
+ checks($("fCat"),CATS.map(c=>[c,c]),"cats",S.cats);
+ $("fDate").innerHTML=PRESETS.map(p=>`<label><input type="radio" name="preset" value="${p}"${S.preset===p?" checked":""}>${p}</label>`).join("");
+ $("dateCustom").hidden=S.preset!=="직접 지정";
+ $("dateNote").textContent=(S.preset!=="전체"&&S.preset!=="직접 지정")?"기준일: 접근 가능한 자료의 가장 최근 수정일 ("+bounds(v)[1]+")":"";
+ const sts=[["shared_folder","공유폴더","sf"],["groupware","그룹웨어","gw"],["business_system","업무시스템","bs"]];
+ $("sources").innerHTML=sts.map(([k,l,c])=>`<div class="src-row">${badge(l,c)}${badge("정상","ok")} 문서 ${v.filter(d=>d.src===k).length}건</div>`).join("")}
+function rowHtml(r,i,ts,cur){const d=r.doc;
+ const hits=r.passages.map(p=>{const sel=cur&&S.sel&&S.sel.seq===p.seq;const sn=snippet(p.t,p.terms.length?p.terms:ts);
+  return`<div class="hit${p.f?" flag":""}${sel?" sel":""}"><div><span class="loc">${esc(p.loc)}</span>${hl(sn,p.terms.length?p.terms:ts)}${p.f?` ${badge("⚠ 지시문 의심","bad")}`:""}</div><button class="sm" data-open="${d.id}" data-seq="${p.seq}">위치 열기</button></div>`}).join("");
+ return`<div class="card${cur?" cur":""}">${tb(d.type)}<span class="rtitle">${esc(d.fileName||d.title)}</span>${d.fileName&&d.fileName!==d.title?` <span class="meta">(${esc(d.title)})</span>`:""}${cur?" ▶ <b>미리보기 중</b>":""}
+ <div class="meta">${d.src==="shared_folder"?"원본 UNC 경로":"원본 위치 (가상 URL)"}: <span class="path">${esc(d.loc)}</span></div>
+ <div class="meta">${badge(d.srcLabel,SKIND[d.src])}${esc((TYPES.find(t=>t[0]===d.type)||[0,d.type])[1])} · 수정 ${d.mod} · ${esc(d.cat)}${d.share?" · "+esc(d.share):""} · v${esc(d.ver)} · 관련도 ${r.score}${r.hits?` · 일치 ${r.hits}곳`:" · 파일명 일치"}</div>
+ ${hits||'<div class="meta">파일명/제목에서 일치했습니다. 본문 위치는 미리보기에서 확인하세요.</div>'}
+ <button class="sm" data-open="${d.id}" data-seq="${r.passages[0]?r.passages[0].seq:""}">문서 미리보기</button></div>`}
+function renderResult(){const L=S.last,el=$("result");
+ if(!L){const vis=visible(),docs=filtered(vis,vis).slice().sort((a,b)=>b.mod>a.mod?1:-1);
+  el.innerHTML=`<div class="notice">검색어를 입력하거나 추천 검색을 선택하세요. 아래는 현재 필터 범위에서 접근할 수 있는 문서 목록입니다.</div><b>문서 ${docs.length}건</b>`+docs.map(d=>`<div class="card">${tb(d.type)}<span class="rtitle">${esc(d.fileName||d.title)}</span><div class="meta"><span class="path">${esc(d.loc)}</span></div><div class="meta">${esc((TYPES.find(t=>t[0]===d.type)||[0,d.type])[1])} · 수정 ${d.mod} · ${esc(d.cat)}</div><button class="sm" data-open="${d.id}" data-seq="">미리보기</button></div>`).join("");return}
+ const r=L.res;
+ if(r.status==="empty"){el.innerHTML='<div class="warnbox">검색어를 입력해 주세요.</div>';return}
+ if(r.status==="none"){el.innerHTML='<div class="notice">관련 문서를 찾지 못했습니다. 다른 표현이나 업무 용어(예: RAFM, GoC, 결산)로 검색하거나 검색 대상·필터를 확인해 보세요.</div>';return}
+ const ts=terms(r.a),cs=cites(r);let head="";
+ const act=[...S.locs.map(k=>(DOCS.find(d=>d.locKey===k)||{}).share?"공유폴더 · "+DOCS.find(d=>d.locKey===k).share:(DOCS.find(d=>d.locKey===k)||{}).srcLabel),...S.types.map(t=>TYPES.find(x=>x[0]===t)[1]),...S.cats];
+ if(S.preset!=="전체")act.push("수정일 "+S.preset);if(S.scope!=="all")act.push(S.scope==="name"?"파일명만":"본문만");
+ const summary=`<b>검색 결과 ${r.total}건</b> (정렬: ${{relevance:"관련도",modified:"수정일",name:"파일명",type:"형식",path:"경로"}[S.sort]} ${S.desc?"↓":"↑"}${r.total>r.results.length?`, 상위 ${r.results.length}건 표시`:""})`+(act.length?"<br>"+act.map(a=>`<span class="badge b-cat">${esc(a)}</span>`).join(""):"");
+ if(L.ai&&L.mock){const use=cs.filter(c=>!c.f).slice(0,3);
+  head=use.length&&r.results[0].score>=4?`<div class="notice"><b>AI 답변 모드</b> · Mock LLM (구조 테스트용 규칙 기반 — 실제 생성형 AI 아님)<br>Mock 구조 테스트 응답입니다. 실제 생성형 AI가 만든 답변이 아니며 근거 문단의 첫 문장을 규칙으로 이어 붙인 것입니다.<br><br>${use.map((c,i)=>esc(firstSentence(c.t))+" ["+(i+1)+"]").join("<br>")}<div class="nav">${use.map((c,i)=>`<button class="sm" data-open="${c.doc.id}" data-seq="${c.seq}">[${i+1}] ${esc(c.doc.title)} · ${esc(c.loc)}</button>`).join("")}</div></div>`:'<div class="notice"><b>AI 답변 모드</b><br>확인 불가: 접근 가능한 문서에서 질문에 답할 충분한 근거를 찾지 못했습니다.</div>'}
+ else head=(L.ai?'<div class="warnbox">실제 LLM은 연결되지 않았습니다. 로컬 검색 모드 결과로 대체합니다.</div>':"")+'<div class="notice">로컬 검색 모드: AI가 생성한 답변이 아니라, 권한이 있는 문서에서 찾은 일치 위치와 원문입니다.</div>';
+ el.innerHTML=`<p>${summary}</p>${head}`+r.results.map((x,i)=>rowHtml(x,i,ts,S.sel&&S.sel.id===x.doc.id)).join("")+`<details><summary>검색어 해석 보기</summary><div class="meta">정규화된 질문: ${esc(r.a.normalized)}</div><ul>${r.a.concepts.map(c=>`<li><b>${esc(c.term)}</b>${c.generic?" (일반어)":""}${c.variants.length>1?" ≈ "+esc(c.variants.slice(1).map(v=>v[0]).join(", ")):""}</li>`).join("")}</ul></details>`}
+function codebox(label,val){return`<div class="meta"><b>${label}</b></div><div class="codebox"><code>${esc(val)}</code><button class="sm" data-copy="${esc(val)}">복사</button></div>`}
+function renderPreview(){const el=$("preview");if(!S.sel)return;const d=DOCS.find(x=>x.id===S.sel.id);
+ if(!d||!can(curUser(),d)){el.innerHTML='<div class="warnbox">이 문서를 열 수 없습니다. 문서가 삭제되었거나 열람 권한이 없습니다.</div>';return}
+ const q=S.last?S.last.q:"",res=S.last&&S.last.res.a?S.last.res.a:null,ts=terms(res),ms=matches(d,q),seqs=ms.map(m=>m.seq),cur=S.sel.seq,i=seqs.indexOf(cur);
+ const folder=d.loc.includes("\\")?d.loc.slice(0,d.loc.lastIndexOf("\\")):"";
+ let nav="";
+ if(ms.length){nav=`<div class="meta"><b>일치 위치 ${ms.length}곳</b>${i>=0?` · 현재 ${i+1}/${ms.length}`:""}</div><div class="nav"><button class="sm" data-nav="-1">◀ 이전 일치</button><button class="sm" data-nav="1">다음 일치 ▶</button></div><div class="nav">${ms.slice(0,12).map(m=>`<button class="sm" data-open="${d.id}" data-seq="${m.seq}">${m.seq===cur?"● ":"○ "}${esc(m.loc||"문단 "+(m.seq+1))}</button>`).join("")}</div><label><input type="checkbox" id="only"${S.only?" checked":""}> 일치한 문단만 보기</label>`}
+ else if(q)nav='<div class="meta">이 문서에는 현재 검색어와 일치하는 본문 위치가 없습니다 (파일명/제목 일치일 수 있습니다).</div>';
+ const show=d.chunks.filter(c=>!S.only||seqs.includes(c.seq)||c.seq===cur);
+ el.innerHTML=`<h3 style="margin-top:0;border:0">${esc(d.fileName||d.title)}</h3>${tb(d.type)}${badge(d.srcLabel,SKIND[d.src])}${badge(d.cat,"cat")}
+ ${codebox(d.src==="shared_folder"?"원본 UNC 경로":"원본 위치 (가상 URL)",d.loc)}${folder?codebox("상위 폴더 경로",folder):""}<span class="toast" id="toast"></span>
+ <dl class="kv"><dt>문서</dt><dd>${esc(d.title)} (${d.id})</dd><dt>형식</dt><dd>${esc((TYPES.find(t=>t[0]===d.type)||[0,d.type])[1])}</dd><dt>버전 / 최종 수정일</dt><dd>${esc(d.ver)} / ${d.mod}</dd><dt>담당 부서</dt><dd>${esc(d.dept)}</dd>${d.share?`<dt>공유폴더</dt><dd>${esc(d.share)}</dd>`:""}</dl>
+ <div class="meta">${esc(d.locDetail)}<br>가상 원본 경로입니다(예약 도메인 .invalid). 실제 시스템에는 연결되지 않습니다.</div>${nav}
+ <h3>원문 (선택한 위치는 노란색, 일치 단어는 형광펜)</h3>`+show.map(c=>`<div class="passage${c.seq===cur?" sel":""}${c.f?" flag":""}${(!ms.length||seqs.includes(c.seq)||c.seq===cur)?"":" dim"}"><span class="loc">📍 ${esc(c.loc)}</span>${c.h&&c.h!==d.title?`<b>${esc(c.h)}</b><br>`:""}${hl(c.t,ts)}${c.f?`<br>${badge("⚠ 지시문 의심: "+c.fr,"bad")} 문서 속 문장은 실행되지 않습니다.`:""}</div>`).join("")}
+function renderHist(){const h=S.hist.filter(e=>e.user===S.user),el=$("hist");
+ if(!h.length){el.innerHTML='<span class="empty">이전 검색이 없습니다.</span>';return}
+ el.innerHTML=h.slice(0,8).map(e=>{const ok=e.ids.every(id=>{const d=DOCS.find(x=>x.id===id);return d&&can(curUser(),d)});
+  return`<details><summary>${e.time} · ${esc(e.q)}</summary>${ok?`<div class="meta">${e.ai?"AI 답변 모드(Mock)":"로컬 검색 모드"}</div>${esc(e.text)}`:'<div class="warnbox">이 답변의 근거 문서가 삭제·변경되었거나 접근권한이 변경되어 내용을 표시하지 않습니다. 필요하면 다시 검색해 주세요.</div>'}<div><button class="sm" data-redo="${esc(e.q)}">다시 검색</button></div></details>`}).join("")}
+function run(q,rec=true){$("q").value=q;const res=search(q);S.last={q,res,ai:$("aimode").checked,mock:$("mock").checked};
+ if(res.status==="ok"){const r0=res.results[0];S.sel={id:r0.doc.id,seq:r0.passages[0]?r0.passages[0].seq:null};
+  if(rec)S.hist.unshift({user:S.user,q,ai:S.last.ai&&S.last.mock,text:"관련 문서 "+res.total+"건: "+res.results.map(r=>r.doc.title).join(", "),ids:[...new Set(res.results.map(r=>r.doc.id))],time:new Date().toTimeString().slice(0,8)})}
+ else if(res.status!=="empty")S.sel=null;
+ renderAll()}
+function rerun(){if(S.last&&S.last.res.status!=="empty"&&S.last.q.trim())run(S.last.q,false);else renderAll()}
+const renderAll=()=>{renderLeft();renderResult();renderPreview();renderHist()};
+/* ---- 초기화/이벤트 ---- */
+$("user").innerHTML=USERS.map(u=>`<option value="${u.user_id}">${esc(u.name)}</option>`).join("");
+$("sug").innerHTML=SUG.map(s=>`<button type="button" class="sm" data-redo="${esc(s)}">${esc(s)}</button>`).join("");
+$("user").onchange=e=>{S.user=e.target.value;S.last=null;S.sel=null;S.cats=[];S.types=[];S.locs=[];$("preview").innerHTML='<div class="notice">선택한 문서가 없습니다.</div>';renderAll()};
+$("qform").onsubmit=e=>{e.preventDefault();run($("q").value)};
+$("revoke").onchange=()=>{rerun();renderPreview()};
+$("aimode").onchange=$("mock").onchange=()=>{if(S.last)run(S.last.q,false)};
+$("sort").onchange=e=>{S.sort=e.target.value;rerun()};$("desc").onchange=e=>{S.desc=e.target.checked;rerun()};$("topk").onchange=e=>{S.topk=+e.target.value;rerun()};
+$("d1").onchange=$("d2").onchange=rerun;
+$("reset").onclick=()=>{S.cats=[];S.types=[];S.locs=[];S.preset="전체";S.scope="all";S.sort="relevance";S.desc=true;$("sort").value="relevance";$("desc").checked=true;document.querySelector('input[name=scope][value=all]').checked=true;$("d1").value=$("d2").value="";rerun()};
+function copy(text){const t=$("toast");const done=ok=>{if(t){t.textContent=ok?"복사됨":"복사하지 못했습니다. 경로를 직접 선택해 복사하세요.";setTimeout(()=>{if(t)t.textContent=""},2500)}};
+ try{navigator.clipboard.writeText(text).then(()=>done(true),()=>done(false))}catch(e){done(false)}}
+document.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
+ if(b.dataset.redo!==undefined)run(b.dataset.redo);
+ else if(b.dataset.open){S.sel={id:b.dataset.open,seq:b.dataset.seq===""||b.dataset.seq===undefined?null:+b.dataset.seq};renderResult();renderPreview()}
+ else if(b.dataset.copy!==undefined)copy(b.dataset.copy);
+ else if(b.dataset.nav){const d=DOCS.find(x=>x.id===S.sel.id),seqs=matches(d,S.last?S.last.q:"").map(m=>m.seq);if(!seqs.length)return;const i=seqs.indexOf(S.sel.seq),n=+b.dataset.nav;
+  S.sel.seq=i<0?(n>0?seqs[0]:seqs[seqs.length-1]):seqs[(i+n+seqs.length)%seqs.length];renderResult();renderPreview()}});
+document.addEventListener("change",e=>{const t=e.target;
+ if(t.dataset.k){const a=S[t.dataset.k];t.checked?a.push(t.value):a.splice(a.indexOf(t.value),1);rerun()}
+ else if(t.name==="preset"){S.preset=t.value;rerun()}
+ else if(t.name==="scope"){S.scope=t.value;rerun()}
+ else if(t.id==="only"){S.only=t.checked;renderPreview()}});
+renderAll();
+</script>

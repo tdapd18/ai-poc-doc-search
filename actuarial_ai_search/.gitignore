@@ -5,3 +5,4 @@ __pycache__/
 database/*.db
 database/*.db-journal
 .env
+web_demo/
