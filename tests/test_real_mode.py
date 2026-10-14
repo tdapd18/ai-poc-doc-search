@@ -64,7 +64,7 @@ def test_metadata_only_never_reads_file_content(make_real, win, rec):
     svc, user, rep = ready(make_real, win, deny_read=["기밀"])
     assert win.fs.reads == [] and len(win.fs.opens) >= 12
     docs = svc.indexer.list_documents(searchable_only=False)
-    assert docs and all(d.index_level == "metadata" and d.body == "" for d in docs)
+    assert docs and all(d.index_level == "metadata" and svc.indexer.get_document(d.doc_id).body == "" for d in docs)
     assert all(svc.indexer.get_chunks(d.doc_id) == [] for d in docs)
     assert PHRASE.encode("utf-8") not in db_bytes(svc)
     rec(f"문서 {len(docs)}건 색인, 본문 읽기 {len(win.fs.reads)}회, 열기 확인 {len(win.fs.opens)}회")

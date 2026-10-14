@@ -101,10 +101,6 @@ class SearchResponse:
     volatile: bool = False  # 표시 직전 재검증에서 일부 후보가 거부됨 → 원본 상태가 바뀌면 달라질 수 있어 캐시하지 않는다
 
 
-def _count(text: str, term: str) -> int:
-    return text.count(term) if term else 0
-
-
 def _to_iso(d: date | str | None) -> str | None:
     if d is None or d == "":
         return None
@@ -117,6 +113,8 @@ class SearchEngine:
         self.access = access
         self.dictionary = dictionary
         self._cache: dict[tuple, tuple[int, SearchResponse]] = {}
+        # 색인에 저장되는 정규화 텍스트를 이 엔진의 사전과 항상 일치시킨다 (사전이 바뀌었으면 자동으로 다시 계산)
+        indexer.ensure_normalization(dictionary.signature(), lambda t: normalize_text(t, dictionary))
 
     # -- 캐시 ----------------------------------------------------------------
     def invalidate_cache(self) -> None:
@@ -212,7 +210,14 @@ class SearchEngine:
                                   unavailable_sources=unavailable, generation=generation)
 
         meta_only = sum(1 for d in docs if d.index_level == "metadata")
-        scored = [r for r in (self._score_document(d, analysis, scope) for d in docs) if r]
+        # 후보 추출: 질의 용어가 하나도 없는 조각은 점수에 기여하지 않으므로 SQL 로 미리 걸러낸다 (결과는 동일)
+        name_norms = self.indexer.name_norms() if scope in ("all", "name") else {}
+        cand: dict[str, list[Chunk]] = {}
+        if scope in ("all", "body"):
+            cand = self.indexer.candidate_chunks(sorted({t for c in analysis.concepts for t, _ in c.variants}))
+        hashes = self.indexer.content_hashes()
+        scored = [r for r in (self._score_document(d, analysis, scope, name_norms.get(d.doc_id), cand.get(d.doc_id, []),
+                                                   hashes.get(d.doc_id, "")) for d in docs) if r]
         scored = self._sort(scored, sort, descending)
         total = len(scored)
         # 표시 직전 엄격 재검증: 삭제·권한 회수·공유 불가인 문서는 건너뛰고 다음 순위로 채운다
@@ -250,12 +255,14 @@ class SearchEngine:
     # -- 점수 계산 -----------------------------------------------------------
     @staticmethod
     def _best_variant(concept: Concept, text: str) -> tuple[float, int, str]:
-        """text 안에서 개념의 가장 높은 가중치 용어와 (가중치, 출현횟수, 용어)를 반환."""
+        """text 안에서 개념의 가장 높은 가중치 용어와 (가중치, 출현횟수, 용어)를 반환.
+        변형은 가중치 내림차순(원 질의어 → 동의어)이므로 더 높은 가중치가 이미 일치했으면 나머지는 세지 않는다."""
         best = (0.0, 0, "")
         for term, w in concept.variants:
-            n = _count(text, term)
-            if n and w > best[0]:
-                best = (w, n, term)
+            if w > best[0]:
+                n = text.count(term)
+                if n:
+                    best = (w, n, term)
         return best
 
     def _chunk_scores(self, chunks: list[Chunk], analysis: QueryAnalysis, title_hit: set[str]):
@@ -264,8 +271,8 @@ class SearchEngine:
         core = [c for c in concepts if not c.generic] or concepts
         out = []
         for ch in chunks:
-            text = normalize_text(ch.text, self.dictionary)
-            heading = normalize_text(ch.heading, self.dictionary)
+            text = ch.norm_text or normalize_text(ch.text, self.dictionary)
+            heading = ch.norm_heading or normalize_text(ch.heading, self.dictionary)
             raw, hit, terms = 0.0, set(), []
             for c in concepts:
                 w_b, n_b, t_b = self._best_variant(c, text)
@@ -287,7 +294,9 @@ class SearchEngine:
                 out.append((raw * (0.5 + 0.5 * cov), ch, tuple(dict.fromkeys(terms)), hit))
         return out
 
-    def _score_document(self, doc: Document, analysis: QueryAnalysis, scope: str = "all") -> SearchResult | None:
+    def _score_document(self, doc: Document, analysis: QueryAnalysis, scope: str = "all", name_norm: str | None = None,
+                        chunks: list[Chunk] | None = None, content_hash: str | None = None) -> SearchResult | None:
+        """chunks/name_norm 을 주면 미리 추출한 후보를 쓰고, 생략하면 문서의 모든 조각을 읽는다(기준 구현, 테스트용)."""
         concepts = analysis.concepts
         core_concepts = [c for c in concepts if not c.generic] or concepts
         use_name = scope in ("all", "name")
@@ -301,8 +310,8 @@ class SearchEngine:
         title_score, title_hit = 0.0, set()
         if use_name:
             # 메타데이터 수준 문서는 폴더 경로도 이름 검색 대상이다 (예: 폴더명으로 찾기)
-            name_text = normalize_text(f"{doc.title} {doc.file_name}" + (f" {doc.location}" if metadata_level else ""),
-                                       self.dictionary)
+            name_text = name_norm if name_norm is not None else normalize_text(
+                f"{doc.title} {doc.file_name}" + (f" {doc.location}" if metadata_level else ""), self.dictionary)
             for c in concepts:
                 w, n, _ = self._best_variant(c, name_text)
                 if n:
@@ -312,7 +321,8 @@ class SearchEngine:
         doc_hit = set(title_hit)
         chunk_scores = []
         if use_body:
-            chunk_scores = self._chunk_scores(self.indexer.get_chunks(doc.doc_id), analysis, title_hit)
+            chunk_scores = self._chunk_scores(chunks if chunks is not None else self.indexer.get_chunks(doc.doc_id),
+                                              analysis, title_hit)
             for *_, hit in chunk_scores:
                 doc_hit |= hit
 
@@ -331,7 +341,7 @@ class SearchEngine:
             doc_id=doc.doc_id, title=doc.title, source_key=doc.source_key, source_system=doc.source_system,
             category=doc.category, version=doc.version, modified_at=doc.modified_at, department=doc.department,
             location=doc.location, location_detail=doc.location_detail,
-            content_hash=self.indexer.content_hash_of(doc.doc_id) or "",
+            content_hash=(content_hash if content_hash is not None else self.indexer.content_hash_of(doc.doc_id)) or "",
             score=round(score, 1), coverage=round(doc_cov, 2), passages=passages, file_type=doc.file_type,
             file_name=doc.file_name, share=doc.share, hit_count=len(chunk_scores), name_match=bool(title_hit),
             index_level=doc.index_level,

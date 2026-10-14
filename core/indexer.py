@@ -20,7 +20,7 @@ from pathlib import Path
 from core.document_parser import detect_injection, split_chunks
 from core.models import Chunk, Document
 
-SCHEMA_VERSION = "4"  # 색인은 원본에서 다시 만들 수 있는 파생 데이터이므로, 버전이 다르면 비우고 다시 만든다.
+SCHEMA_VERSION = "5"  # 색인은 원본에서 다시 만들 수 있는 파생 데이터이므로, 버전이 다르면 비우고 다시 만든다.
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -32,12 +32,14 @@ CREATE TABLE IF NOT EXISTS documents (
     allowed_groups_json TEXT NOT NULL DEFAULT '[]', body TEXT NOT NULL,
     file_type TEXT NOT NULL DEFAULT 'md', file_name TEXT NOT NULL DEFAULT '', share TEXT NOT NULL DEFAULT '',
     fingerprint TEXT NOT NULL DEFAULT '', index_level TEXT NOT NULL DEFAULT 'full', size_bytes INTEGER NOT NULL DEFAULT 0,
+    name_norm TEXT NOT NULL DEFAULT '',
     content_hash TEXT NOT NULL, acl_hash TEXT NOT NULL, indexed_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS chunks (
     id INTEGER PRIMARY KEY AUTOINCREMENT, doc_id TEXT NOT NULL REFERENCES documents(doc_id) ON DELETE CASCADE,
     seq INTEGER NOT NULL, heading TEXT NOT NULL, text TEXT NOT NULL,
-    flagged INTEGER NOT NULL DEFAULT 0, flag_reason TEXT NOT NULL DEFAULT '', loc TEXT NOT NULL DEFAULT ''
+    flagged INTEGER NOT NULL DEFAULT 0, flag_reason TEXT NOT NULL DEFAULT '', loc TEXT NOT NULL DEFAULT '',
+    norm_text TEXT NOT NULL DEFAULT '', norm_heading TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(doc_id);
 CREATE TABLE IF NOT EXISTS source_status (
@@ -47,12 +49,18 @@ CREATE TABLE IF NOT EXISTS source_status (
 """
 
 
+_DOC_COLS = ("doc_id", "title", "source_key", "source_system", "category", "version", "created_at", "modified_at", "department",
+             "location", "location_detail", "attachments_json", "allowed_users_json", "allowed_groups_json", "file_type",
+             "file_name", "share", "fingerprint", "index_level", "size_bytes")
+
+
 def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 class Indexer:
-    def __init__(self, db_path: Path | str):
+    def __init__(self, db_path: Path | str, normalizer=None):
+        self._normalizer = normalizer or (lambda t: t.lower())  # 검색 엔진이 ensure_normalization 으로 교체한다
         self.db_path = Path(db_path)
         if str(self.db_path) != ":memory:":
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -129,21 +137,23 @@ class Indexer:
                     "INSERT INTO documents (doc_id, title, source_key, source_system, category, version, created_at,"
                     " modified_at, department, location, location_detail, attachments_json, allowed_users_json,"
                     " allowed_groups_json, body, file_type, file_name, share, fingerprint, index_level, size_bytes,"
-                    " content_hash, acl_hash, indexed_at)"
-                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    " name_norm, content_hash, acl_hash, indexed_at)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (d.doc_id, d.title, d.source_key, d.source_system, d.category, d.version, d.created_at,
                      d.modified_at, d.department, d.location, d.location_detail,
                      json.dumps(list(d.attachments), ensure_ascii=False),
                      json.dumps(list(d.allowed_users), ensure_ascii=False),
                      json.dumps(list(d.allowed_groups), ensure_ascii=False),
                      d.body, d.file_type, d.file_name, d.share, d.fingerprint, d.index_level, d.size_bytes,
-                     d.content_hash(), d.acl_hash(), _now()),
+                     self._normalizer(self.name_text(d)), d.content_hash(), d.acl_hash(), _now()),
                 )
                 for seq, (heading, loc, text) in enumerate(self._segments(d)):
                     reason = detect_injection(text)
                     c.execute(
-                        "INSERT INTO chunks(doc_id, seq, heading, text, flagged, flag_reason, loc) VALUES (?,?,?,?,?,?,?)",
-                        (d.doc_id, seq, heading, text, int(bool(reason)), reason, loc),
+                        "INSERT INTO chunks(doc_id, seq, heading, text, flagged, flag_reason, loc, norm_text, norm_heading)"
+                        " VALUES (?,?,?,?,?,?,?,?,?)",
+                        (d.doc_id, seq, heading, text, int(bool(reason)), reason, loc, self._normalizer(text),
+                         self._normalizer(heading)),
                     )
             self._bump(c)
 
@@ -182,7 +192,7 @@ class Indexer:
         return Document(
             doc_id=r["doc_id"], title=r["title"], source_key=r["source_key"], source_system=r["source_system"],
             category=r["category"], version=r["version"], created_at=r["created_at"], modified_at=r["modified_at"],
-            department=r["department"], location=r["location"], body=r["body"],
+            department=r["department"], location=r["location"], body=r["body"] if "body" in r.keys() else "",
             allowed_users=tuple(json.loads(r["allowed_users_json"])),
             allowed_groups=tuple(json.loads(r["allowed_groups_json"])),
             location_detail=r["location_detail"], attachments=tuple(json.loads(r["attachments_json"])),
@@ -200,19 +210,77 @@ class Indexer:
             row = c.execute("SELECT content_hash FROM documents WHERE doc_id=?", (doc_id,)).fetchone()
         return row["content_hash"] if row else None
 
-    def list_documents(self, searchable_only: bool = True) -> list[Document]:
-        """searchable_only=True 이면 마지막 동기화에 성공한(status=ok) 저장소의 문서만 반환한다."""
-        sql = "SELECT d.* FROM documents d"
+    def list_documents(self, searchable_only: bool = True, include_body: bool = False) -> list[Document]:
+        """searchable_only=True 이면 마지막 동기화에 성공한(status=ok) 저장소의 문서만 반환한다.
+        본문은 기본적으로 불러오지 않는다(검색마다 전체 본문을 읽는 비용 방지) — 필요하면 get_document 사용."""
+        cols = "d.*" if include_body else ", ".join(f"d.{c}" for c in _DOC_COLS)
+        sql = f"SELECT {cols} FROM documents d"
         if searchable_only:
             sql += " JOIN source_status s ON s.source_key = d.source_key AND s.status = 'ok'"
         sql += " ORDER BY d.source_key, d.doc_id"
         with self._conn() as c:
             return [self._row_to_doc(r) for r in c.execute(sql).fetchall()]
 
+    # -- 검색 속도: 정규화 텍스트 저장 + SQL 후보 추출 ---------------------------------
+    @staticmethod
+    def name_text(d: Document) -> str:
+        """이름 검색 대상 텍스트. 메타데이터 수준 문서는 폴더 경로도 포함한다."""
+        return f"{d.title} {d.file_name}" + (f" {d.location}" if d.index_level == "metadata" else "")
+
+    def ensure_normalization(self, signature: str, normalizer) -> bool:
+        """질의 정규화 규칙(별칭 사전)이 바뀌었으면 저장된 정규화 텍스트를 다시 계산한다. 다시 계산했으면 True."""
+        self._normalizer = normalizer
+        with self._conn() as c:
+            row = c.execute("SELECT value FROM meta WHERE key='norm_signature'").fetchone()
+            if row and row[0] == signature:
+                return False
+            docs = c.execute("SELECT doc_id, title, file_name, location, index_level FROM documents").fetchall()
+            for r in docs:
+                name = f"{r['title']} {r['file_name']}" + (f" {r['location']}" if r["index_level"] == "metadata" else "")
+                c.execute("UPDATE documents SET name_norm=? WHERE doc_id=?", (normalizer(name), r["doc_id"]))
+            for r in c.execute("SELECT id, heading, text FROM chunks").fetchall():
+                c.execute("UPDATE chunks SET norm_text=?, norm_heading=? WHERE id=?",
+                          (normalizer(r["text"]), normalizer(r["heading"]), r["id"]))
+            c.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('norm_signature', ?)", (signature,))
+        return True
+
+    def content_hashes(self) -> dict[str, str]:
+        with self._conn() as c:
+            return {r[0]: r[1] for r in c.execute("SELECT doc_id, content_hash FROM documents").fetchall()}
+
+    def name_norms(self) -> dict[str, str]:
+        with self._conn() as c:
+            return {r[0]: r[1] for r in c.execute("SELECT doc_id, name_norm FROM documents").fetchall()}
+
+    def candidate_chunks(self, terms: list[str]) -> dict[str, list[Chunk]]:
+        """질의 용어(동의어 포함) 중 하나라도 정규화 텍스트/소제목에 포함된 조각만 SQL 로 추출한다.
+        점수 계산에서 일치가 없는 조각은 기여하지 않으므로 결과는 전체 조각을 훑는 것과 같다."""
+        terms = [t for t in dict.fromkeys(terms) if t]
+        out: dict[str, list[Chunk]] = {}
+        if not terms:
+            return out
+
+        def esc(t: str) -> str:
+            return t.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+        with self._conn() as c:
+            for i in range(0, len(terms), 200):  # SQLite 변수 개수 한도 대비
+                part = terms[i:i + 200]
+                cond = " OR ".join("norm_text LIKE ? ESCAPE '\\' OR norm_heading LIKE ? ESCAPE '\\'" for _ in part)
+                params = [f"%{esc(t)}%" for t in part for _ in (0, 1)]
+                for r in c.execute(
+                        "SELECT doc_id, seq, heading, text, flagged, flag_reason, loc, norm_text, norm_heading "
+                        f"FROM chunks WHERE {cond} ORDER BY doc_id, seq", params).fetchall():
+                    out.setdefault(r["doc_id"], {})[r["seq"]] = Chunk(  # type: ignore[assignment]
+                        r["seq"], r["heading"], r["text"], bool(r["flagged"]), r["flag_reason"], r["loc"],
+                        r["norm_text"], r["norm_heading"])
+        return {k: [v[s] for s in sorted(v)] for k, v in out.items()}  # type: ignore[union-attr]
+
     def get_chunks(self, doc_id: str) -> list[Chunk]:
         with self._conn() as c:
             rows = c.execute("SELECT * FROM chunks WHERE doc_id=? ORDER BY seq", (doc_id,)).fetchall()
-        return [Chunk(r["seq"], r["heading"], r["text"], bool(r["flagged"]), r["flag_reason"], r["loc"]) for r in rows]
+        return [Chunk(r["seq"], r["heading"], r["text"], bool(r["flagged"]), r["flag_reason"], r["loc"],
+                      r["norm_text"], r["norm_heading"]) for r in rows]
 
     def count_documents(self) -> int:
         with self._conn() as c:

@@ -82,6 +82,8 @@ class Chunk:
     flagged: bool = False  # 지시문 의심 문장 포함 여부
     flag_reason: str = ""
     loc: str = ""  # 원문 위치: "p.2" / "시트 '요약' · 셀 A5:D5" / "슬라이드 3" / "줄 12–18"
+    norm_text: str = ""  # 색인 시 계산해 저장한 정규화 텍스트(검색 속도용). 비어 있으면 질의 시 계산
+    norm_heading: str = ""
 
 
 @dataclass(frozen=True)

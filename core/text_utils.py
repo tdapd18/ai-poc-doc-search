@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass, field
@@ -61,6 +62,10 @@ class SearchDictionary:
             return cls(json.loads(Path(path).read_text(encoding="utf-8")))
         except (OSError, json.JSONDecodeError):
             return cls({})  # 사전이 없어도 검색은 동작한다 (동의어 확장만 비활성)
+
+    def signature(self) -> str:
+        """정규화 규칙(별칭)의 지문. 바뀌면 색인에 저장된 정규화 텍스트를 다시 계산해야 한다."""
+        return hashlib.sha1(json.dumps(sorted(self.aliases.items()), ensure_ascii=False).encode("utf-8")).hexdigest()
 
     def synonyms(self, term: str) -> tuple[str, ...]:
         return self._group_of.get(term, (term,))

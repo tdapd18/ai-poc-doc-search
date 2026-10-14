@@ -92,6 +92,10 @@ def check_share(share: Share, fs: FileSystem, cfg: AppConfig, *, sample_files: i
                 r.transient += 1
                 continue
         for e in sorted(entries, key=lambda x: x.name.casefold()):
+            if r.scanned_entries >= scan_limit or clock() > deadline:  # 폴더·파일 구분 없이 항목 수/시간 한도 적용
+                r.truncated = True
+                stack.clear()
+                break
             if e.name.startswith(".") or any(fnmatch.fnmatch(e.name.casefold(), p) for p in excludes) or e.is_link:
                 continue
             r.scanned_entries += 1
@@ -113,10 +117,6 @@ def check_share(share: Share, fs: FileSystem, cfg: AppConfig, *, sample_files: i
                 r.total_bytes += e.size
             else:
                 r.unsupported += 1
-            if r.scanned_entries >= scan_limit or clock() > deadline:
-                r.truncated = True
-                stack.clear()
-                break
     if r.truncated:
         r.warnings.append("공유가 커서 일부만 점검했습니다. 통계는 추정치입니다.")
     # 4) 권한 표본: 파일을 열 수 있는지만 확인(내용 미열람)

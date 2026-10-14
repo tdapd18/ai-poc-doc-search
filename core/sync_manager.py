@@ -71,8 +71,8 @@ class SyncReport:
             parts = []
             for label, items in (("신규", s.added), ("수정", s.updated), ("버전변경", s.version_changed),
                                  ("권한변경", s.acl_changed), ("삭제", s.deleted)):
-                if items:
-                    parts.append(f"{label} {len(items)}건({', '.join(items)})")
+                if items:  # 많으면 건수만 (수만 건의 ID 나열 방지)
+                    parts.append(f"{label} {len(items)}건" + (f"({', '.join(items)})" if len(items) <= 5 else ""))
             lines.append(f"[{s.source_label}] " + (", ".join(parts) if parts else "변경 없음")
                          + f" · 변경 없는 문서 {s.unchanged}건")
             if s.invalid:

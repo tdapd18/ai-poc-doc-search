@@ -24,6 +24,9 @@ ai-poc-doc-search/   (저장소 루트)
 │   └── TEST_RESULTS.md    # 자동 테스트 결과표 (입력조건 / 예상 / 실제 / 통과)
 ├── tools/make_sample_files.py  # 샘플 PDF/Excel/PPT 생성기 (개발 전용, requirements-dev.txt 필요)
 ├── tools/build_web_demo.py     # 정적 웹 시연판(HTML) 생성기 — data/ 에서 tools/web_demo_template.html 로 빌드
+├── tools/benchmark_search.py   # 검색 성능 벤치마크(합성 데이터)
+├── scripts/run_real.ps1, run_demo.ps1   # 실제 Windows 모드 / 데모 모드 실행
+├── ui/setup_page.py            # 실제 모드 초기 설정 화면
 ├── connectors/            # 저장소별 Connector (공통 인터페이스 base.py)
 │   ├── base.py  shared_folder.py  groupware.py  business_system.py
 ├── core/
@@ -31,6 +34,7 @@ ai-poc-doc-search/   (저장소 루트)
 │   ├── document_parser.py # 메타데이터 파싱, 문단 분할(줄 번호), 지시문 의심 탐지
 │   ├── extractors.py      # PDF(쪽)/Excel(시트·셀)/PPT(슬라이드) 추출 — 표준 라이브러리만 사용
 │   ├── shares.py          # 공유폴더(UNC) 등록부
+│   ├── fs.py, identity.py, app_config.py, metadata.py, setup_check.py   # 실제 모드: 파일시스템 추상화·Windows 계정·설정·자동 메타데이터·연결 테스트
 │   ├── indexer.py         # SQLite 색인 (documents / chunks / source_status)
 │   ├── text_utils.py      # 한국어 용어 정규화·동의어 확장
 │   ├── search_engine.py   # 점수 산정, 권한 필터, 캐시 재검증
@@ -46,7 +50,7 @@ ai-poc-doc-search/   (저장소 루트)
 │   ├── metadata/shares.json              # 등록된 공유폴더(UNC ↔ 가상 폴더)
 │   └── demo_users.json                   # 가상 사용자 3명
 ├── database/              # SQLite 색인 파일(index.db)이 자동 생성되는 위치 (git 제외)
-└── tests/                 # pytest (자동 테스트 141건, 브라우저 테스트 3건 포함)
+└── tests/                 # pytest (자동 테스트 231건, 브라우저 테스트 포함)
 ```
 
 ## Windows PC 실행 방법 (PowerShell)
@@ -111,6 +115,18 @@ macOS/Linux 는 `python3 -m venv .venv && source .venv/bin/activate` 후 동일�
 | FileLocator Pro | UNC 공유폴더 등록, 다중 경로 검색 | 등록부(`shares.json`) 기반 다중 공유 + 위치 필터 (가상 폴더 연결) |
 | Everything | 파일명 검색, 정렬 가능한 간결한 결과 목록 | `파일명만` 검색 대상, 형식/경로/수정일 정렬, 검색 전 문서 목록 |
 | Copernic Desktop Search | 문서 유형·위치·수정일 필터 | 유형/위치/분류/수정일 필터 + 선택지별 문서 수(접근 가능 문서 기준) |
+
+## 실제 Windows 공유폴더 검색 모드 (개인 PC)
+
+데모(가상 데이터)와 별도로, **개인 Windows PC 에서 로그인한 계정으로 읽을 수 있는 실제 공유폴더(UNC)** 를 검색하는 모드를 제공한다.
+기본은 데모 모드이고, `APP_MODE=real` 일 때만 켜진다: `.\scripts\run_real.ps1`.
+
+- 초기 설정 화면: **보안 모드 선택 → 공유폴더(UNC) 등록 → 연결 테스트 → 색인 생성**
+- 권한: Windows 계정의 실제 파일 접근권한(운영 체제 판정) — 결과를 보여주기 직전마다 파일 열기로 재검증
+- 색인 수준: **메타데이터 전용(기본, 파일 내용 미열람)** / 본문 검색(보안 승인 기록 필요)
+- `.meta.json` 없이 자동 색인, DOCX·CSV·PDF·Excel·PPT, 증분 갱신, 수정·삭제·권한 변경의 안전한 처리
+- 자세한 내용·보안 통제·실기 검증 체크리스트: [`docs/WINDOWS_REAL_MODE.md`](docs/WINDOWS_REAL_MODE.md), 설계·결과: [`docs/WINDOWS_SHARE_PLAN.md`](docs/WINDOWS_SHARE_PLAN.md)
+- **현재는 합성 Windows 공유(가상 데이터)로만 검증**했으며 실제 회사 PC 연결 테스트는 보안 승인 후 별도로 수행한다.
 
 ## 구현 현황 요약
 

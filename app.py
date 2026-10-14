@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import html
+import os
 from datetime import date, timedelta
 
 import streamlit as st
@@ -20,7 +21,8 @@ from core.models import CATEGORIES, FILE_TYPE_SHORT, FILE_TYPES
 from core.presentation import (SOURCE_KIND, TYPE_KIND, badge_html, folder_of, make_snippet, path_html,
                                safe_highlight_html)
 from core.search_engine import SCOPES, SORTS, location_key
-from core.services import build_services
+from core.services import build_real_services, build_services, sync_with_audit
+from ui.setup_page import render_setup
 from core.shares import ShareError
 
 st.set_page_config(page_title="계리 업무자료 AI 통합검색", page_icon="🔎", layout="wide")
@@ -32,7 +34,9 @@ SUGGESTIONS = [
     "CSM 변동률 기준",
     "E101 오류 조치",
 ]
-TYPE_ORDER = ["pdf", "xlsx", "pptx", "md", "txt", "post", "record"]
+TYPE_ORDER = ["pdf", "docx", "xlsx", "pptx", "csv", "md", "txt", "doc", "xls", "ppt", "hwp", "post", "record"]
+APP_MODE = os.environ.get("APP_MODE", "demo").strip().lower()  # demo(가상 데이터, 기본) | real(실제 Windows 공유폴더)
+REAL = APP_MODE == "real"
 SORT_LABELS = {"relevance": "관련도", "modified": "수정일", "name": "파일명", "type": "형식", "path": "경로"}
 SCOPE_LABELS = {"all": "파일명 + 본문", "name": "파일명만", "body": "본문만"}
 DATE_PRESETS = ["전체", "최근 7일", "최근 30일", "최근 90일", "직접 지정"]
@@ -79,17 +83,20 @@ div[data-testid="stButton"] button { border-radius:6px; }
 
 # --------------------------------------------------------------------------- 서비스/상태
 @st.cache_resource
-def get_services():
+def get_services(mode: str):
     settings = load_settings()
+    if mode == "real":  # 실제 모드: 자동 색인하지 않는다(초기 설정 화면에서 사용자가 직접 생성)
+        return build_real_services(llm_provider=settings.llm_provider), settings
     svc = build_services(settings.data_dir, settings.db_path, llm_provider=settings.llm_provider)
     if not svc.indexer.source_statuses():  # 최초 실행 시 1회 자동 색인
         svc.sync.sync()
     return svc, settings
 
 
-svc, settings = get_services()
+svc, settings = get_services(APP_MODE)
 ss = st.session_state
-ss.setdefault("user_id", svc.access.users()[0].user_id if svc.access.users() else None)
+ss.setdefault("user_id", svc.identity.principal if REAL else (svc.access.users()[0].user_id if svc.access.users() else None))
+ss.setdefault("page", "setup" if REAL and not svc.shares.list() else "search")
 ss.setdefault("history", [])
 ss.setdefault("last", None)
 ss.setdefault("selected", None)  # (doc_id, chunk_seq | None)
@@ -209,7 +216,7 @@ def on_select(doc_id: str, seq: int | None = None) -> None:
 
 
 def on_sync() -> None:
-    ss.sync_report = svc.sync.sync()
+    ss.sync_report = sync_with_audit(svc) if REAL else svc.sync.sync()
 
 
 def on_register(name: str, unc: str, local_dir: str) -> None:
@@ -257,6 +264,12 @@ def loc_options(visible) -> dict[str, tuple[str, int]]:
 
 
 # --------------------------------------------------------------------------- 레이아웃
+if REAL:
+    st.radio("화면", ["search", "setup"], format_func=lambda p: "🔎 검색" if p == "search" else "⚙ 초기 설정", key="page",
+             horizontal=True, label_visibility="collapsed")
+    if ss.page == "setup":
+        render_setup(st, svc, ss)
+        st.stop()
 user = current_user()
 visible_all = svc.engine.list_visible_documents(user)
 left, center, right = st.columns([1.0, 2.2, 1.45], gap="large")
@@ -264,10 +277,17 @@ left, center, right = st.columns([1.0, 2.2, 1.45], gap="large")
 # ================= 왼쪽: 검색 범위 및 필터 =================
 with left:
     st.markdown("### 검색 범위 및 필터")
-    st.selectbox("가상 사용자 선택", options=[u.user_id for u in svc.access.users()],
-                 format_func=lambda uid: svc.access.get_user(uid).name, key="user_id", on_change=on_user_change)
-    st.markdown('<div class="warnbox">⚠ 교육용 <b>가상 사용자</b> 전환입니다. 실제 회사 인증(SSO/AD)이 아니며, '
-                "운영 시에는 사내 인증·원본 시스템 ACL 연동이 필요합니다.</div>", unsafe_allow_html=True)
+    if REAL:
+        st.markdown(f"**Windows 계정**: `{html.escape(svc.identity.principal)}`")
+        st.markdown('<div class="notice">검색 결과는 이 계정이 운영 체제에서 실제로 읽을 수 있는 파일로 제한되며, '
+                    "결과를 보여주기 직전에 접근 가능 여부를 다시 확인합니다.</div>", unsafe_allow_html=True)
+        level = "본문 검색" if svc.config.full_text else "메타데이터 전용"
+        st.markdown(badge_html("색인 수준: " + level, "ok" if svc.config.full_text else "cat"), unsafe_allow_html=True)
+    else:
+        st.selectbox("가상 사용자 선택", options=[u.user_id for u in svc.access.users()],
+                     format_func=lambda uid: svc.access.get_user(uid).name, key="user_id", on_change=on_user_change)
+        st.markdown('<div class="warnbox">⚠ 교육용 <b>가상 사용자</b> 전환입니다. 실제 회사 인증(SSO/AD)이 아니며, '
+                    "운영 시에는 사내 인증·원본 시스템 ACL 연동이 필요합니다.</div>", unsafe_allow_html=True)
     st.metric("접근 가능한 통합 문서 수", len(visible_all))
 
     # --- 위치 (공유폴더별 다중 경로 / 그룹웨어 / 업무시스템)
@@ -324,7 +344,7 @@ with left:
                 st.text(line)
 
     # --- 공유폴더(UNC) 등록: 관리자 전용
-    if svc.shares is not None:
+    if svc.shares is not None and not REAL:
         if user and user.role == "admin":
             with st.expander("공유폴더(UNC) 등록 · 관리 (관리자)"):
                 st.caption("PoC: UNC 경로는 표시용이며 실제 SMB 접속은 하지 않습니다. "
@@ -356,8 +376,17 @@ with left:
 # ================= 가운데: 검색 결과 =================
 with center:
     st.title("🔎 계리 업무자료 AI 통합검색")
-    st.caption("여러 공유폴더·그룹웨어·업무시스템의 가상 자료를 한 번에 검색하고, 일치 위치와 원본 경로를 확인합니다. "
-               "(교육용 PoC · 가상 더미데이터)")
+    if REAL:
+        st.caption("등록한 공유폴더에서 현재 Windows 계정이 읽을 수 있는 문서를 검색하고, 일치 위치와 원본 경로를 확인합니다.")
+        if not svc.config.full_text:
+            st.markdown('<div class="notice">🔒 <b>메타데이터 전용 모드</b>: 파일 이름·경로·형식·수정일만 검색합니다. '
+                        "파일 내용은 읽지 않습니다. 본문 검색은 보안 승인 후 ‘초기 설정’에서 켤 수 있습니다.</div>",
+                        unsafe_allow_html=True)
+        if svc.indexer.count_documents() == 0:
+            st.warning("색인된 문서가 없습니다. ‘⚙ 초기 설정’에서 공유폴더를 등록하고 색인을 생성하세요.")
+    else:
+        st.caption("여러 공유폴더·그룹웨어·업무시스템의 가상 자료를 한 번에 검색하고, 일치 위치와 원본 경로를 확인합니다. "
+                   "(교육용 PoC · 가상 더미데이터)")
 
     with st.form("search_form"):
         st.text_input("검색어 또는 질문", key="query_text",
@@ -446,15 +475,18 @@ with center:
                         f'{type_badge(r.file_type)}<span class="rtitle">{html.escape(r.file_name or r.title)}</span>'
                         + (f' <span class="meta">({html.escape(r.title)})</span>' if r.file_name and r.file_name != r.title else "")
                         + (" ▶ <b>미리보기 중</b>" if is_sel else "")
+                        + (f" {badge_html('원본 변경됨 · 색인 갱신 필요', 'warn')}" if r.stale else "")
+                        + (f" {badge_html('본문 미색인', 'cat')}" if r.index_level == "metadata" else "")
                         + f'<div class="meta">{html.escape(path_label(r.source_key))}: '
                           f'<span class="path">{path_html(r.location)}</span></div>'
                         f'<div class="meta">{badge_html(r.source_system, SOURCE_KIND.get(r.source_key, "cat"))}'
                         f"{FILE_TYPES.get(r.file_type, r.file_type)} · 수정 {r.modified_at} · {html.escape(r.category)}{where}"
                         f" · v{html.escape(r.version)} · 관련도 {r.score}"
-                        + (f" · 일치 {r.hit_count}곳" if r.hit_count else " · 파일명 일치")
+                        + (f" · 일치 {r.hit_count}곳" if r.hit_count else " · 파일명/경로 일치")
                         + "</div>", unsafe_allow_html=True)
                     if not r.passages:
-                        st.caption("파일명/제목에서 일치했습니다. 본문 위치는 미리보기에서 확인하세요.")
+                        st.caption("파일명·경로만 색인된 문서입니다 (본문 검색 비활성)." if r.index_level == "metadata"
+                                   else "파일명/제목에서 일치했습니다. 본문 위치는 미리보기에서 확인하세요.")
                     for p in r.passages:
                         sel = is_sel and ss.selected[1] == p.chunk_seq
                         c1, c2 = st.columns([5, 1.4])
@@ -526,7 +558,11 @@ with right:
         doc, chunks = opened
         st.markdown(f"#### {html.escape(doc.file_name or doc.title)}")
         st.markdown(type_badge(doc.file_type) + badge_html(doc.source_system, SOURCE_KIND.get(doc.source_key, "cat"))
-                    + badge_html(doc.category, "cat"), unsafe_allow_html=True)
+                    + badge_html(doc.category, "cat")
+                    + (badge_html("원본 변경됨 · 색인 갱신 필요", "warn") if svc.access.is_stale(doc) else ""),
+                    unsafe_allow_html=True)
+        if doc.index_level == "metadata":
+            st.info("이 문서는 파일 이름·경로·형식·수정일만 색인되어 본문 미리보기가 없습니다 (메타데이터 전용 모드이거나 본문 추출을 지원하지 않는 형식).")
         st.markdown(f"**{path_label(doc.source_key)}** (오른쪽 위 아이콘으로 복사)")
         st.code(doc.location, language=None)
         if doc.source_key == "shared_folder":

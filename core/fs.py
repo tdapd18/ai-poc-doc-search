@@ -137,6 +137,12 @@ class FileSystem(ABC):
             return False
 
 
+def _created_ns(st) -> int:
+    """파일 생성 시각(ns). Windows 는 st_birthtime(3.12+) 또는 st_ctime(생성 시각), Linux 는 st_birthtime 없으면 변경 시각."""
+    birth = getattr(st, "st_birthtime", None)
+    return int(birth * 1_000_000_000) if birth else st.st_ctime_ns
+
+
 def classify_oserror(exc: OSError) -> FsError:
     """OSError → FsError 분류 (Windows winerror 포함). 메시지에 경로를 넣지 않는다."""
     winerr = getattr(exc, "winerror", None)
@@ -176,7 +182,7 @@ class LocalFS(FileSystem):
                     except OSError:
                         continue  # 목록에는 보이나 속성을 읽을 수 없는 항목은 건너뜀
                     out.append(FsEntry(e.name, unc_join(path, e.name), is_dir, 0 if is_dir else st.st_size,
-                                       st.st_mtime_ns, getattr(st, "st_birthtime_ns", None) or st.st_ctime_ns, link))
+                                       st.st_mtime_ns, _created_ns(st), link))
         except OSError as exc:
             raise classify_oserror(exc) from None
         return out
@@ -186,7 +192,7 @@ class LocalFS(FileSystem):
             st = os.stat(self._p(path))
         except OSError as exc:
             raise classify_oserror(exc) from None
-        return FsStat(st.st_size, st.st_mtime_ns, getattr(st, "st_birthtime_ns", None) or st.st_ctime_ns)
+        return FsStat(st.st_size, st.st_mtime_ns, _created_ns(st))
 
     def read_bytes(self, path: str, max_bytes: int) -> bytes:
         try:
@@ -316,7 +322,7 @@ class MappedFS(FileSystem):
             is_link = c.is_symlink()
             is_dir = c.is_dir() and not is_link
             out.append(FsEntry(c.name, unc_join(path, c.name), is_dir, 0 if is_dir else st.st_size, st.st_mtime_ns,
-                               getattr(st, "st_birthtime_ns", None) or st.st_ctime_ns, is_link))
+                               _created_ns(st), is_link))
         return out
 
     def stat(self, path: str) -> FsStat:
@@ -328,7 +334,7 @@ class MappedFS(FileSystem):
             st = p.stat()
         except OSError as exc:
             raise classify_oserror(exc) from None
-        return FsStat(st.st_size, st.st_mtime_ns, getattr(st, "st_birthtime_ns", None) or st.st_ctime_ns)
+        return FsStat(st.st_size, st.st_mtime_ns, _created_ns(st))
 
     def _open_checks(self, path: str) -> Path:
         key = unc_key(path)
