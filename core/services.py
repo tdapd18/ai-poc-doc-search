@@ -14,6 +14,7 @@ from core.config import PROJECT_ROOT
 from core.fs import FileSystem, LocalFS
 from core.identity import WindowsIdentity, current_identity
 from core.answer_generator import AnswerGenerator
+from core.storage_security import harden_dir, purge_residue
 from core.indexer import Indexer
 from core.llm_client import LLMClient, build_client
 from core.search_engine import SearchEngine
@@ -74,6 +75,8 @@ def build_real_services(home: Path | str | None = None, *, fs: FileSystem | None
     cfg.mode = "real"
     identity = identity or current_identity()
     data_dir = Path(data_dir) if data_dir else PROJECT_ROOT / "data"
+    harden_dir(store.home)  # 색인 폴더: 현재 계정 전용
+    purge_residue(store.home)  # 이전 실행·수동 복사로 남은 백업/임시/저널 파일을 덮어써 삭제
     indexer = Indexer(store.home / "index.db")
     indexer.ensure_owner(identity.key)
     registry = ShareRegistry(store.home / "shares.json", store.home / "virtual")

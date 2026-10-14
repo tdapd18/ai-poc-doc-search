@@ -484,7 +484,9 @@ with center:
                         f" · v{html.escape(r.version)} · 관련도 {r.score}"
                         + (f" · 일치 {r.hit_count}곳" if r.hit_count else " · 파일명/경로 일치")
                         + "</div>", unsafe_allow_html=True)
-                    if not r.passages:
+                    if r.stale:
+                        st.caption("원본 파일이 색인 이후 변경되어 과거 본문은 표시하지 않습니다. '색인 갱신' 후 다시 검색하세요.")
+                    elif not r.passages:
                         st.caption("파일명·경로만 색인된 문서입니다 (본문 검색 비활성)." if r.index_level == "metadata"
                                    else "파일명/제목에서 일치했습니다. 본문 위치는 미리보기에서 확인하세요.")
                     for p in r.passages:
@@ -511,8 +513,8 @@ with center:
         st.markdown('<div class="notice">검색어를 입력하거나 추천 검색을 선택하세요. 아래는 현재 필터 범위에서 '
                     "접근할 수 있는 문서 목록입니다 (파일명 기준).</div>", unsafe_allow_html=True)
         d_from, d_to = date_bounds(visible_all)
-        browse = svc.engine.list_visible_documents(
-            user, ss.f_cats or None, file_types=ss.f_types or None, locations=ss.f_locs or None,
+        browse = svc.engine.refine(  # visible_all 은 이번 렌더링에서 이미 재검증됨 → 같은 정책으로 좁히기만 한다
+            visible_all, ss.f_cats or None, file_types=ss.f_types or None, locations=ss.f_locs or None,
             modified_from=d_from, modified_to=d_to)
         keyf = {"relevance": lambda d: d.modified_at, "modified": lambda d: d.modified_at,
                 "name": lambda d: (d.file_name or d.title).casefold(), "type": lambda d: d.file_type,
@@ -561,7 +563,9 @@ with right:
                     + badge_html(doc.category, "cat")
                     + (badge_html("원본 변경됨 · 색인 갱신 필요", "warn") if svc.access.is_stale(doc) else ""),
                     unsafe_allow_html=True)
-        if doc.index_level == "metadata":
+        if svc.access.is_stale(doc):
+            st.warning("원본 파일이 색인 이후 변경되어 과거 본문은 표시하지 않습니다. '색인 갱신' 후 다시 확인하세요.")
+        elif doc.index_level == "metadata":
             st.info("이 문서는 파일 이름·경로·형식·수정일만 색인되어 본문 미리보기가 없습니다 (메타데이터 전용 모드이거나 본문 추출을 지원하지 않는 형식).")
         st.markdown(f"**{path_label(doc.source_key)}** (오른쪽 위 아이콘으로 복사)")
         st.code(doc.location, language=None)

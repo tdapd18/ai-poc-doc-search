@@ -76,6 +76,8 @@ class AnswerGenerator:
                 continue  # 검색 이후 삭제/권한 회수 — 생성 직전 OS 재검증
             if self.indexer.content_hash_of(doc.doc_id) != r.content_hash:
                 continue  # 검색 이후 내용 변경 → 오래된 근거 사용 금지
+            if self.access.is_stale(doc):
+                continue  # 원본이 색인 이후 바뀜 → 과거 문단을 근거로 쓰지 않는다
             for p in r.passages:
                 cites.append(Citation(
                     number=len(cites) + 1, doc_id=doc.doc_id, title=doc.title, source_system=doc.source_system,

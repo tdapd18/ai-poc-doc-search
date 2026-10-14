@@ -230,7 +230,7 @@ class SearchEngine:
             if doc is None or not self.access.verify(user, doc):
                 rejected += 1
                 continue
-            final.append(replace(r, stale=True) if self.access.is_stale(doc) else r)
+            final.append(replace(r, stale=True, passages=[]) if self.access.is_stale(doc) else r)  # 과거 문단 비노출
         if not final:
             return SearchResponse(query, "no_results", "질문과 관련된 문서를 찾지 못했습니다.", analysis=analysis,
                                   unavailable_sources=unavailable, generation=generation,
@@ -356,6 +356,8 @@ class SearchEngine:
         analysis = analyze_query(query, self.dictionary)
         if not analysis.concepts:
             return []
+        if self.access.is_stale(doc):
+            return []
         scores = self._chunk_scores(self.indexer.get_chunks(doc_id), analysis, set())
         return sorted(((ch.seq, ch.loc, round(s, 2)) for s, ch, *_ in scores))
 
@@ -364,7 +366,19 @@ class SearchEngine:
                                sources: list[str] | None = None, *, file_types: list[str] | None = None,
                                locations: list[str] | None = None, modified_from: date | str | None = None,
                                modified_to: date | str | None = None) -> list[Document]:
+        """화면에 보여줄 문서 목록. 색인 스냅샷이 아니라 **지금** 열 수 있는 문서만 돌려준다.
+
+        색인 이후 권한이 회수·파일이 삭제된 문서, 저장소가 검색 불가 상태인 문서는 색인 갱신 전이라도 제외된다
+        (문서명·경로·건수·필터 선택지 모두 이 결과에서만 만든다). 확인이 불가능하면 거부(fail-closed)한다.
+        """
         docs = self.access.filter_documents(user, self.indexer.list_documents(searchable_only=True))
+        docs = self._apply_filters(docs, categories, sources, file_types, locations, _to_iso(modified_from),
+                                   _to_iso(modified_to))  # 값싼 메타 조건을 먼저 적용해 파일 열기 횟수를 줄인다
+        return [d for d in docs if self.access.verify(user, d)]
+
+    def refine(self, docs: list[Document], categories=None, sources=None, *, file_types=None, locations=None,
+               modified_from=None, modified_to=None) -> list[Document]:
+        """이미 재검증된 목록(list_visible_documents 결과)을 추가 조건으로 좁힌다. 파일을 다시 열지 않는다."""
         return self._apply_filters(docs, categories, sources, file_types, locations, _to_iso(modified_from),
                                    _to_iso(modified_to))
 
@@ -376,6 +390,8 @@ class SearchEngine:
         statuses = {s["source_key"]: s["status"] for s in self.indexer.source_statuses()}
         if statuses.get(doc.source_key) != "ok":
             return None
+        if self.access.is_stale(doc):  # 원본이 색인 후 바뀜: 과거 본문(바뀌었거나 지워졌을 수 있음)은 보여주지 않는다
+            return doc, []
         return doc, self.indexer.get_chunks(doc_id)
 
 

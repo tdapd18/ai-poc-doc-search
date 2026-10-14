@@ -66,6 +66,8 @@ class Indexer:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             new_file = not self.db_path.exists()
         self._memory_conn = sqlite3.connect(":memory:") if str(self.db_path) == ":memory:" else None
+        if self._memory_conn is None and not new_file:
+            self._discard_if_corrupt()
         with self._conn() as c:
             self._migrate(c)
             c.executescript(_SCHEMA)
@@ -73,6 +75,21 @@ class Indexer:
             c.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?)", (SCHEMA_VERSION,))
         if str(self.db_path) != ":memory:" and new_file and os.name == "posix":
             os.chmod(self.db_path, 0o600)  # 개인 색인 파일: 본인만 읽기/쓰기 (Windows 는 사용자 프로필 ACL 에 의존)
+
+    def _discard_if_corrupt(self) -> None:
+        """저널을 디스크에 두지 않으므로 비정상 종료 시 파일이 손상될 수 있다. 색인은 원본에서 다시 만들 수 있는
+        파생 데이터이므로, 손상됐으면 내용을 덮어써 지우고 새로 만든다."""
+        from core.storage_security import wipe_file
+        try:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                ok = conn.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+            finally:
+                conn.close()
+        except sqlite3.DatabaseError:
+            ok = False
+        if not ok:
+            wipe_file(self.db_path)
 
     @staticmethod
     def _migrate(c: sqlite3.Connection) -> None:
@@ -91,6 +108,9 @@ class Indexer:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA secure_delete = ON")  # 삭제된 행의 내용을 파일에 남기지 않고 덮어쓴다
+        if self._memory_conn is None:
+            conn.execute("PRAGMA temp_store = MEMORY")      # 정렬·임시 테이블이 디스크 임시파일로 남지 않게
+            conn.execute("PRAGMA journal_mode = MEMORY")    # 롤백 저널(변경 전 본문 페이지 사본)을 디스크에 만들지 않는다
         try:
             yield conn
             conn.commit()
@@ -315,6 +335,10 @@ class Indexer:
             c.execute("DELETE FROM source_status")
             self._bump(c)
         self.vacuum()
+        if self._memory_conn is None:  # 남은 저널/WAL 파일 정리
+            from core.storage_security import wipe_file
+            for suffix in ("-journal", "-wal", "-shm"):
+                wipe_file(self.db_path.with_name(self.db_path.name + suffix))
 
     def vacuum(self) -> None:
         if self._memory_conn is not None:

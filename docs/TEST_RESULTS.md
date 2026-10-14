@@ -1,6 +1,6 @@
 # 자동 테스트 결과 (pytest)
 
-- 전체 231건 중 통과 231건 / 실패 0건
+- 전체 247건 중 통과 247건 / 실패 0건
 - 데이터는 모두 가상 더미데이터이며 외부 네트워크·실제 LLM 호출은 없습니다 (LLM 관련은 Mock 구현으로 검증).
 
 | 파일 | 테스트 | 입력조건 | 예상 결과 | 실제 결과 | 통과 |
@@ -119,6 +119,7 @@
 | test_real_app.py | `test_permission_revocation_visible_in_ui_without_resync` | 본문 색인 후 한 문서의 권한 회수 → 같은 검색 재실행(색인 갱신 없음) → 미리보기 열기 | 결과에서 즉시 사라지고 미리보기는 열 수 없음 안내 | 예상 결과와 일치 | ✅ |
 | test_real_app.py | `test_delete_index_button` | 색인 생성 후 설정 화면에서 확인 체크 후 '색인 삭제' | 확인 전에는 비활성, 확인 후 로컬 색인이 모두 삭제되고 단계 표시가 초기화 | 예상 결과와 일치 | ✅ |
 | test_real_app.py | `test_unregister_share_and_disable` | 등록된 공유를 '색인에 사용' 해제 / 등록 해제 | 사용 안 함이면 테스트·색인 대상에서 빠지고, 등록 해제하면 목록에서 사라짐 | 예상 결과와 일치 | ✅ |
+| test_real_app.py | `test_first_screen_hides_revoked_file_without_resync` | 본문 색인 후 한 파일의 권한 회수·다른 파일 삭제(색인 갱신 없음) → 앱 첫 화면(검색 전) | 문서 목록·경로·접근 가능 문서 수·유형별 건수·필터 선택지에 회수/삭제 파일이 나타나지 않음 | 접근 가능 문서 19 → 17, 회수·삭제 파일명 비노출 | ✅ |
 | test_real_mode.py | `test_register_unc_validation` | 실제 UNC 등록 — 관리자 공유(C$), 장치 경로, 드라이브 경로, 슬래시 경로, 하위/상위 중복, 경로 구분자가 든 제외 패턴, 정상 등록 | 위험·잘못된 입력은 ShareError 로 거부되고 정상 등록은 kind=unc 로 저장됨 | 관리자 공유·장치 경로·중복·겹침 거부 확인 | ✅ |
 | test_real_mode.py | `test_metadata_only_never_reads_file_content` | 기본 설정(메타데이터 전용)으로 합성 공유를 색인 | 파일 내용을 읽은 횟수 0(reads=[]), 권한 확인용 열기만 수행, 본문 조각·본문 텍스트가 색인 DB 어디에도 없음(고유 문구 미존재) | 문서 18건 색인, 본문 읽기 0회, 열기 확인 18회 | ✅ |
 | test_real_mode.py | `test_metadata_only_search_by_name_path_and_body_notice` | 메타데이터 전용에서 파일명·폴더명·확장자로 검색, 본문 용어로 검색, 본문만 범위로 검색 | 파일명·폴더 경로로는 찾고, 본문 용어는 못 찾으며, 본문만 범위는 결과 없음 + 본문 미색인 문서 수 안내 | 예상 결과와 일치 | ✅ |
@@ -195,6 +196,21 @@
 | test_search_ux.py | `test_snippet_centers_on_match_and_highlights_safely` | 긴 본문 중간에 검색어가 있는 텍스트, HTML 태그가 섞인 텍스트 | 일치 위치 주변만 '…'과 함께 발췌되고 일치 단어가 강조되며 HTML 은 이스케이프됨 | … 앞부분 앞부분 앞부분 앞부분 앞부분 앞부분 앞부분 앞부분 앞부분 RAFM 실행 오류가  | ✅ |
 | test_search_ux.py | `test_location_key_and_folder_of` | 공유폴더/그룹웨어 문서의 위치 키, UNC 경로의 상위 폴더 계산 | 공유는 'shared_folder:표시이름', 그 외는 저장소 키, 상위 폴더 경로는 파일명 제외 | 예상 결과와 일치 | ✅ |
 | test_search_ux.py | `test_unc_path_html_keeps_double_backslash` | UNC 경로를 마크다운 안의 HTML 로 출력 | 역슬래시가 문자 참조로 바뀌어 마크다운 이스케이프에 의해 줄어들지 않고, HTML 특수문자는 이스케이프됨 | 예상 결과와 일치 | ✅ |
+| test_security_hardening.py | `test_list_hides_revoked_file_everywhere_before_resync` | 색인 후 DOCX 읽기 권한 회수(색인 갱신 없음) — 문서 목록·접근 가능 문서 수·유형별/위치별 건수·필터 선택지·경로 | 회수된 파일명·경로가 목록에 없고 건수가 1 줄며, 해당 유형 건수가 줄어들고 필터 선택지가 실제 접근 가능한 값만 남음 | 16건 → 15건 → 13건 | ✅ |
+| test_security_hardening.py | `test_list_with_filters_is_verified_and_stale_index_not_modified` | 분류·유형·위치·날짜 필터를 건 목록 조회 중 권한 회수 | 필터를 건 조회도 동일하게 재검증하고, 조회가 색인을 바꾸지 않음(색인 세대 유지) | 예상 결과와 일치 | ✅ |
+| test_security_hardening.py | `test_virtual_demo_mode_list_unchanged` | 데모(가상 사용자) 모드의 문서 목록 | 기존 ACL 결과와 동일(재검증 정책이 데모 ACL 결과를 바꾸지 않음) | 13건 동일 | ✅ |
+| test_security_hardening.py | `test_network_outage_then_recovery` | 공유 전체 오프라인 → 목록·검색·미리보기 → 복구 | 오프라인 중에는 목록·경로·건수·결과·미리보기 모두 비어 있고(캐시 포함), 복구 후 색인 갱신 없이 다시 보이며 '없음' 결과가 캐시에 남지 않음 | 오프라인 0건 → 복구 16건 | ✅ |
+| test_security_hardening.py | `test_permission_revoked_then_restored` | 권한 회수 → 확인 → 권한 복구 → 확인 | 회수 중에는 어디에도 안 보이고, 복구하면 색인 갱신 없이 다시 표시됨. 회수 중 색인 갱신 시에는 색인에서 제거되고 복구 후 재색인으로 돌아옴 | 예상 결과와 일치 | ✅ |
+| test_security_hardening.py | `test_deleted_file_disappears_from_list_before_resync` | 파일 삭제(색인 갱신 없음) → 목록 → 색인 갱신 | 갱신 전에도 목록·건수에서 제외, 갱신 후 색인에서도 삭제 | 예상 결과와 일치 | ✅ |
+| test_security_hardening.py | `test_modified_file_never_shows_old_paragraphs` | 본문 색인 후 원본 수정(색인 갱신 없음) — 검색 결과 문단, 미리보기, 일치 위치, AI 근거, 이전 답변 | '원본 변경됨' 표시와 함께 과거 문단 본문이 어디에도 노출되지 않음. 색인 갱신 후에는 새 내용만 표시됨 | 수정 후 stale: 문단·미리보기·근거·이전 답변 비노출, 갱신 후 새 내용 | ✅ |
+| test_security_hardening.py | `test_vanished_mid_session_does_not_leak_name_or_path` | 목록 조회 중 파일이 사라짐(vanish) | 해당 문서가 목록에서 제외됨 | 예상 결과와 일치 | ✅ |
+| test_security_hardening.py | `test_home_dir_is_owner_only` | 실제 모드 서비스 생성 | 색인 폴더 0700, index.db 0600 | 예상 결과와 일치 | ✅ |
+| test_security_hardening.py | `test_no_journal_or_temp_files_left_after_sync_and_reset` | 본문 색인 → 갱신 → 색인 삭제 | 색인 폴더에 -journal/-wal/-shm/임시 파일이 남지 않고, 삭제 후 DB 바이트에 본문 문구가 없음 | 저널·임시 파일 없음, reset 후 본문 문구 없음 | ✅ |
+| test_security_hardening.py | `test_residue_purge_overwrites_backups_and_keeps_live_files` | 색인 폴더에 index.db.bak, 색인 복사본, 임시 파일이 남아 있음 → 서비스 기동 | 기동 시 잔존 파일이 덮어쓰기 후 삭제되고 index.db·config·shares.json 은 유지됨 | 잔존 3개 삭제, 라이브 파일 유지 | ✅ |
+| test_security_hardening.py | `test_wipe_file_overwrites_before_unlink` | 본문이 든 파일을 wipe_file | 파일이 삭제되고 없는 파일도 오류 없이 처리 | 예상 결과와 일치 | ✅ |
+| test_security_hardening.py | `test_corrupt_index_is_discarded_and_rebuilt` | 비정상 종료로 index.db 가 손상됨 → 서비스 기동 | 손상 파일을 폐기하고 빈 색인으로 시작, 다시 색인 가능 | 예상 결과와 일치 | ✅ |
+| test_security_hardening.py | `test_sync_folder_warning` | 색인 폴더가 OneDrive 폴더 아래 | 클라우드 동기화 경고 문구가 나옴 | 예상 결과와 일치 | ✅ |
+| test_security_hardening.py | `test_db_pragmas_do_not_use_disk_temp` | 파일 DB 연결 | secure_delete=ON, temp_store=MEMORY, journal_mode=MEMORY | 예상 결과와 일치 | ✅ |
 | test_setup_check.py | `test_successful_check_reports_stats_without_reading_content` | 정상 합성 공유에서 연결 테스트 | 성공(ok), 형식별 파일 수·미지원·구형 집계, 권한 표본 읽기 가능, 파일 내용 읽기 호출 0회 | ok=True 색인대상≈19 형식={'txt': 7, 'xlsx': 2, 'docx': 3, 'md': 2, 'csv': 1, 'pdf': 1, 'pptx': 1} 표본 9/9 | ✅ |
 | test_setup_check.py | `test_exclusions_applied_in_check` | 기본 제외 패턴(~$, Thumbs.db, desktop.ini, 숨김)과 공유 단위 제외 패턴 | 점검 통계에서도 제외 대상은 집계되지 않음 | 예상 결과와 일치 | ✅ |
 | test_setup_check.py | `test_error_codes_with_guidance` | 잘못된 경로 형식 / 계정 접근 거부 / 없는 경로 / 오프라인 | invalid_path / denied / not_found / unavailable 로 구분되고 사용자용 메시지가 있음 | 예상 결과와 일치 | ✅ |

@@ -13,6 +13,7 @@ from core.fs import FileSystem
 from core.services import Services, apply_index_mode, sync_with_audit
 from core.setup_check import ConnectionTestResult, check_share
 from core.shares import ShareError
+from core.storage_security import find_residue, purge_residue, storage_warnings
 
 MODE_LABELS = {
     "metadata_only": "메타데이터 전용 (기본·권장) — 파일 이름·경로·형식·수정일만 색인, 내용은 읽지 않음",
@@ -174,6 +175,17 @@ def render_setup(st, svc: Services, ss) -> None:
         with st.expander("최근 색인 결과", expanded=True):
             for line in ss["sync_report"].summary_lines():
                 st.text(line)
+    with st.expander("로컬 색인 저장 보안", expanded=bool(storage_warnings(store.home))):
+        st.caption("색인 파일은 이 PC의 계정 전용 폴더에 저장되며, 임시 저널·정렬 임시파일을 디스크에 만들지 않고 삭제된 내용은 덮어씁니다. "
+                   "BitLocker 같은 디스크 암호화는 별도로 적용하세요(앱이 DB 자체를 암호화하지는 않습니다).")
+        for w in storage_warnings(store.home):
+            st.warning(w)
+        res = find_residue(store.home)
+        if res and st.button(f"백업·임시 잔존 파일 {len(res)}개 안전 삭제", key="setup_purge_residue"):
+            n = purge_residue(store.home)
+            store.audit("residue_purged", count=n)
+            _flash(ss, "success", f"잔존 파일 {n}개를 덮어쓴 뒤 삭제했습니다.")
+            st.rerun()
     with st.expander("색인 삭제 (이 PC에 저장된 색인을 모두 지웁니다)"):
         confirm = st.checkbox("로컬 색인(문서 목록·본문 포함)을 삭제하는 것을 확인합니다.", key="setup_del_confirm")
         if st.button("색인 삭제", key="setup_delete_index", disabled=not confirm):

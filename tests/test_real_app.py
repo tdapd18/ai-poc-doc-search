@@ -203,3 +203,23 @@ def test_unregister_share_and_disable(real_app):
     click(at, key="setup_unreg_0")
     assert any("등록 해제" in s.value or "등록을 해제" in s.value for s in at.success)
     assert "등록된 공유폴더가 없습니다" in " ".join(i.value for i in at.info)
+
+
+def test_first_screen_hides_revoked_file_without_resync(real_app, rec):
+    """입력조건: 본문 색인 후 한 파일의 권한 회수·다른 파일 삭제(색인 갱신 없음) → 앱 첫 화면(검색 전)
+    예상결과: 문서 목록·경로·접근 가능 문서 수·유형별 건수·필터 선택지에 회수/삭제 파일이 나타나지 않음"""
+    at, win, _ = real_app
+    _ready_metadata(at)
+    before = int(next(m for m in at.metric if m.label == "접근 가능한 통합 문서 수").value)
+    assert "IFRS17 결산 검증 가이드_v2.1.docx" in md(at)
+    docx_label = next(o for o in at.multiselect(key="f_types").options if o.startswith("Word") or "DOCX" in o.upper() or "워드" in o)
+    win.fs.deny_read(win.unc("docx"))
+    win.path("csv").unlink()
+    at.run()
+    assert not at.exception
+    page = md(at).replace("&#92;", "\\")
+    assert "IFRS17 결산 검증 가이드_v2.1.docx" not in page and "GoC_변동_2026-09.csv" not in page
+    assert int(next(m for m in at.metric if m.label == "접근 가능한 통합 문서 수").value) == before - 2
+    opts = at.multiselect(key="f_types").options
+    assert next(o for o in opts if o.split(" (")[0] == docx_label.split(" (")[0]) != docx_label  # 건수가 줄어든 새 라벨
+    rec(f"접근 가능 문서 {before} → {before - 2}, 회수·삭제 파일명 비노출")

@@ -50,7 +50,7 @@ ai-poc-doc-search/   (저장소 루트)
 │   ├── metadata/shares.json              # 등록된 공유폴더(UNC ↔ 가상 폴더)
 │   └── demo_users.json                   # 가상 사용자 3명
 ├── database/              # SQLite 색인 파일(index.db)이 자동 생성되는 위치 (git 제외)
-└── tests/                 # pytest (자동 테스트 231건, 브라우저 테스트 포함)
+└── tests/                 # pytest (자동 테스트 247건, 브라우저 테스트 포함)
 ```
 
 ## Windows PC 실행 방법 (PowerShell)
