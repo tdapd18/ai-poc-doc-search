@@ -50,7 +50,7 @@ ai-poc-doc-search/   (저장소 루트)
 │   ├── metadata/shares.json              # 등록된 공유폴더(UNC ↔ 가상 폴더)
 │   └── demo_users.json                   # 가상 사용자 3명
 ├── database/              # SQLite 색인 파일(index.db)이 자동 생성되는 위치 (git 제외)
-└── tests/                 # pytest (자동 테스트 247건, 브라우저 테스트 포함)
+└── tests/                 # pytest (자동 테스트 267건, 브라우저 테스트 포함)
 ```
 
 ## Windows PC 실행 방법 (PowerShell)
@@ -137,3 +137,8 @@ macOS/Linux 는 `python3 -m venv .venv && source .venv/bin/activate` 후 동일�
 | AI 답변 모드 | **인터페이스 + Mock 만 구현·테스트.** 실제 LLM 연결 없음 |
 | 실제 사내망(SMB/그룹웨어/업무시스템/SSO) 연동, 자동 스케줄러, 스캔 PDF(OCR)·임베디드 폰트 PDF 추출 | **미구현 (후속 과제)** — `docs/DESIGN.md` §8 |
 | Windows PC 실제 실행 | **미검증**(개발은 Linux/Python 3.13 에서 수행) |
+
+### 실제 모드 최종 보안 보완 요약
+- 실제 모드 검색은 전체 일치 건수를 계산·표시하지 않고 **접근 확인된 표시 결과만** 안내합니다. 화면에 남은 이전 검색 결과도 렌더링마다 재검증합니다.
+- 로컬 색인 저장 위치는 **검증 후 차단**(권한 변경 없음): 넓은 범위 접근·확인 불가면 색인·본문 표시 차단, 동기화 폴더(OneDrive 등)면 본문 차단.
+- 합성 테스트로 검증했으며 Windows 실기 검증(W-01~W-24)은 보안 승인 후 별도 수행입니다. DB 자체 암호화는 미구현입니다. 자세한 내용은 `docs/WINDOWS_REAL_MODE.md`.

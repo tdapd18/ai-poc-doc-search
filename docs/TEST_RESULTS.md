@@ -1,6 +1,6 @@
 # 자동 테스트 결과 (pytest)
 
-- 전체 247건 중 통과 247건 / 실패 0건
+- 전체 267건 중 통과 267건 / 실패 0건
 - 데이터는 모두 가상 더미데이터이며 외부 네트워크·실제 LLM 호출은 없습니다 (LLM 관련은 Mock 구현으로 검증).
 
 | 파일 | 테스트 | 입력조건 | 예상 결과 | 실제 결과 | 통과 |
@@ -97,6 +97,26 @@
 | test_extractors_v2.py | `test_pdf_cid_font_without_tounicode_is_reported_not_garbled` | ToUnicode 가 없는 Identity-H(CID) 글꼴 PDF | 잘못된 글자를 만들지 않고 '텍스트를 추출할 수 없습니다 (스캔본이거나 …)'로 보고 | 예상 결과와 일치 | ✅ |
 | test_extractors_v2.py | `test_pdf_real_producer_embedded_font_with_tounicode` | reportlab(실제 PDF 생성 라이브러리)으로 TrueType 글꼴을 임베딩해 만든 PDF (Identity-H + ToUnicode) | 표준 라이브러리 추출기가 한자·영문 텍스트를 복원하고, 외부 라이브러리(pypdf)가 읽은 텍스트와 일치 | 決算検証 report E101 / 第二行 CSM 5% | ✅ |
 | test_extractors_v2.py | `test_pdf_flate_literal_latin_and_tj_arrays` | 이전 형식(Helvetica 리터럴 문자열) PDF 가 새 추출기에서도 동작 | 기존 추출 결과 유지(회귀 방지) | 예상 결과와 일치 | ✅ |
+| test_final_hardening.py | `test_real_mode_counts_never_include_unverified_documents` | 여러 문서가 일치하는 질의를 top_k=1 로 검색, 일치 문서 일부의 권한 회수·삭제·네트워크 단절(색인 갱신 없음) | total_matched 는 항상 권한 확인이 끝난 표시 결과 수(전체 일치 수 아님), metadata_only_count 도 표시 결과 안에서만 계산, counts_exact=False | top_k=1 → total_matched=1, 회수 후 5건, 단절 0건, 복구 5건 | ✅ |
+| test_final_hardening.py | `test_demo_mode_counts_still_exact` | 데모(가상 사용자) 모드 검색 | 기존대로 전체 일치 건수를 표시(counts_exact=True, total_matched >= 표시 결과 수) | 예상 결과와 일치 | ✅ |
+| test_final_hardening.py | `test_revalidate_response_rules` | 검색 응답 → 권한 회수 / 복구 / 수정 / 장애 중 거부가 있었던 응답 | 회수·수정 시 False, 복구 후 재검색한 응답은 True, 일시 거부(volatile)가 있던 응답은 항상 False | 예상 결과와 일치 | ✅ |
+| test_final_hardening.py | `test_rendered_session_result_is_revalidated_on_every_run` | 검색 후 (재검색 버튼 없이) 권한 회수 → 화면 재실행 → 선택된 미리보기·이전 검색 이력 확인 → 권한 복구 → 재실행 | 회수 직후 화면에서 파일명·UNC 경로·본문 문단·미리보기가 사라지고 재확인 안내 표시, 복구하면 다시 검색 결과에 나타남 | 회수 후 재렌더링: 파일명·경로·미리보기 비노출, 복구 후 재표시 | ✅ |
+| test_final_hardening.py | `test_rendered_session_result_hides_old_text_after_modification` | 검색 후 원본 파일 수정(재검색·색인 갱신 없음) → 화면 재실행 | 과거 본문 문단이 화면에 남지 않고 '원본 변경됨'만 표시 | 예상 결과와 일치 | ✅ |
+| test_final_hardening.py | `test_search_page_shows_no_total_count_wording` | 실제 모드에서 검색 결과가 top_k 보다 많이 일치 | '검색 결과 N건', '상위 N건 표시' 같은 전체 건수 암시 표현 없이 '접근 확인된 … 표시'만 안내 | 예상 결과와 일치 | ✅ |
+| test_final_hardening.py | `test_sddl_parser_flags_only_broad_allow_aces` | SYSTEM/관리자/본인만 / Users 허용 / Everyone 거부 / 도메인 사용자 허용 SDDL | 넓은 범위 주체의 허용 ACE 만 검출(SYSTEM·관리자·본인·거부 ACE 는 정상) | 예상 결과와 일치 | ✅ |
+| test_final_hardening.py | `test_windows_acl_verification_blocks_unsafe_or_unverifiable` | (가짜 ACL 판독기) 안전한 ACL / icacls 는 성공했으나 Users 허용 ACL / 판독 실패(None) / 판독기 예외 | 안전할 때만 색인 허용. 넓은 접근·확인 불가·예외는 모두 색인과 본문 차단(명령 성공만으로 안전 판단하지 않음) | 안전=허용, 넓은 접근·판독 실패·예외=차단 | ✅ |
+| test_final_hardening.py | `test_existing_db_file_acl_is_also_checked` | 폴더 ACL 은 안전하지만 기존 index.db 파일에 Users 허용 ACE | 색인 차단 | 예상 결과와 일치 | ✅ |
+| test_final_hardening.py | `test_icacls_reader_is_read_only_and_parses_utf16` | read_sddl_icacls 호출(icacls 대체 실행기) | 명령은 '/save' 만 사용(/grant·/deny·/inheritance·/remove 없음 → SYSTEM·관리자 권한을 건드리지 않음), UTF-16 출력에서 SDDL 추출 | 예상 결과와 일치 | ✅ |
+| test_final_hardening.py | `test_cloud_sync_folder_blocks_body_not_metadata` | 색인 폴더가 OneDrive 아래(경로명 / OneDrive 환경변수 하위) | cloud_sync=True, 본문 표시·본문 모드 차단, 안내문 제공 (메타데이터 색인은 가능) | 예상 결과와 일치 | ✅ |
+| test_final_hardening.py | `test_posix_loose_dir_is_tightened_for_own_folder` | (리눅스) 앱이 쓰는 개인 폴더가 0755 | 소유자 전용으로 맞추고 통과 (Windows 는 권한을 바꾸지 않고 검증만 한다) | 예상 결과와 일치 | ✅ |
+| test_final_hardening.py | `test_blocked_storage_prevents_index_creation` | 폴더 권한 검증 실패 상태에서 색인 생성 시도(sync_with_audit) 및 본문 모드 전환 | StorageBlockedError, 색인 0건(공유 파일을 읽지도 않음), 본문 모드 전환 거부, 원본 파일 불변 | 차단: 색인 0건, 본문 모드 거부, 원본 불변 | ✅ |
+| test_final_hardening.py | `test_existing_index_with_unverified_storage_hides_body` | 본문 색인이 이미 있는데 다음 실행에서 저장 위치 보호를 확인하지 못함 | 본문 문구 검색 결과 없음·미리보기 본문 없음·문단 비노출(파일명 검색은 가능), 본문 모드 런타임 해제, 설정 파일은 변경 없음 | 보호 미확인: 본문·문단·미리보기 차단, 파일명 검색 유지 | ✅ |
+| test_final_hardening.py | `test_cloud_sync_home_blocks_full_text_but_allows_metadata` | APP_HOME 이 OneDrive 폴더 아래 | 본문 색인 모드 전환 거부(ConfigError), 메타데이터 색인은 가능하고 본문은 표시되지 않음 | 예상 결과와 일치 | ✅ |
+| test_final_hardening.py | `test_corrupt_index_keeps_originals_and_rebuilds_without_reexposing` | 본문 색인 후 index.db 손상 → 다시 시작 → 그 사이 한 파일 권한 회수 → 재색인 | 원본 공유 파일은 바이트·수정시각 불변, 복구 알림 표시, 이전 본문 문구가 새 DB 에 없음, 회수된 문서는 재색인·검색·목록에 나타나지 않음 | 원본 불변, 손상 복구 알림, 권한 회수 문서 재노출 없음 | ✅ |
+| test_final_hardening.py | `test_undeletable_corrupt_index_blocks_instead_of_crashing` | 손상된 index.db 를 삭제할 수 없음 | 앱은 중단되지 않고 임시 메모리 색인으로 시작하며 색인 생성·본문 표시 차단과 안내 제공 | 예상 결과와 일치 | ✅ |
+| test_final_hardening.py | `test_reset_failure_is_reported_and_blocks_body_until_retry` | 색인 수준 변경 중 색인 삭제(VACUUM) 실패 → 재시도 | IndexResetError 로 사용자에게 알리고 그 사이 본문 표시 차단, 재시작해도 삭제 마무리(reset.pending), 성공 후 DB 에 본문 없음 | 삭제 실패 알림·본문 차단, 재시작 시 마무리, 본문 문구 제거 | ✅ |
+| test_final_hardening.py | `test_mode_change_removes_old_body_and_cache` | 본문 검색 결과를 캐시한 뒤 메타데이터 전용으로 변경 | 이전 본문은 검색되지 않고 캐시 응답도 재사용되지 않으며 DB 바이트에도 남지 않음 | 예상 결과와 일치 | ✅ |
+| test_final_hardening.py | `test_sqlite_journal_setting_documented_risk_is_handled` | 저널을 메모리에 두는 설정 + 비정상 종료로 중간에 잘린 DB | quick_check 에서 감지되어 폐기·재생성되고 앱이 계속 동작함 (원본 무관) | 예상 결과와 일치 | ✅ |
 | test_fs.py | `test_unc_string_helpers` | UNC 문자열 정규화/결합/상대경로/상위/키/확장 경로 변환 | 중복·끝 구분자 정리, 대소문자 무시 비교, 루트 밖 상대화 거부, 긴 경로 접두사 변환 | \\?\UNC\srv\sh\x | ✅ |
 | test_fs.py | `test_mapped_fs_is_case_insensitive_like_windows` | 대소문자가 다른 경로 / 한글·공백 폴더로 목록·상태·읽기 | Windows 처럼 대소문자와 무관하게 같은 파일을 찾음 | 예상 결과와 일치 | ✅ |
 | test_fs.py | `test_access_denied_semantics` | 폴더 목록 거부 / 파일 읽기 거부 주입 | 목록 거부는 scandir 실패, 읽기 거부는 목록에는 보이나 열기·읽기는 FsAccessDenied (NTFS 에서 흔한 상태) | 목록 거부/읽기 거부/복구 확인 | ✅ |

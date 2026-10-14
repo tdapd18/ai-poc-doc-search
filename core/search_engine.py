@@ -94,10 +94,11 @@ class SearchResponse:
     results: list[SearchResult] = field(default_factory=list)
     unavailable_sources: list[str] = field(default_factory=list)  # 오류로 검색에서 제외된 저장소 표시명
     analysis: QueryAnalysis | None = None
-    total_matched: int = 0  # 권한 필터 이후 일치 문서 수 (top_k 로 잘리기 전)
+    total_matched: int = 0  # 일치 문서 수. counts_exact=False(실제 모드)이면 '권한 확인이 끝난 표시 결과 수'일 뿐 전체 수가 아니다
+    counts_exact: bool = True  # False: 전체 일치 건수는 권한 미검증이라 계산·표시하지 않는다(건수로 문서 존재를 추론 못 하게)
     generation: int = 0
     from_cache: bool = False
-    metadata_only_count: int = 0  # (권한·필터 적용 후) 본문이 색인되지 않은 문서 수
+    metadata_only_count: int = 0  # 본문이 색인되지 않은 문서 수 (counts_exact=False 이면 표시된 결과 안에서만 센다)
     volatile: bool = False  # 표시 직전 재검증에서 일부 후보가 거부됨 → 원본 상태가 바뀌면 달라질 수 있어 캐시하지 않는다
 
 
@@ -113,6 +114,8 @@ class SearchEngine:
         self.access = access
         self.dictionary = dictionary
         self._cache: dict[tuple, tuple[int, SearchResponse]] = {}
+        # True 이면 본문(조각)을 검색·표시하지 않는다 — 로컬 색인 저장 위치의 보호를 확인하지 못했을 때(실제 모드)
+        self.body_blocked = False
         # 색인에 저장되는 정규화 텍스트를 이 엔진의 사전과 항상 일치시킨다 (사전이 바뀌었으면 자동으로 다시 계산)
         indexer.ensure_normalization(dictionary.signature(), lambda t: normalize_text(t, dictionary))
 
@@ -131,6 +134,13 @@ class SearchEngine:
             if self.access.is_stale(doc) != r.stale:
                 return False
         return True
+
+    def revalidate_response(self, user: User | None, response: SearchResponse) -> bool:
+        """화면(세션)에 남아 있는 이전 응답을 다시 그려도 되는지 — 지금도 모든 결과가 열람 가능·미변경인지 확인한다.
+        일시 장애로 일부가 거부됐던 응답(volatile)은 복구 여부를 알 수 없으므로 항상 False(재검색)."""
+        if response.volatile:
+            return False
+        return self._revalidate(user, response)
 
     # -- 검색 ----------------------------------------------------------------
     def search(self, user: User | None, query: str, categories: list[str] | None = None,
@@ -209,16 +219,21 @@ class SearchEngine:
                                   "업무 용어를 포함해 다시 질문해 주세요.", analysis=analysis,
                                   unavailable_sources=unavailable, generation=generation)
 
-        meta_only = sum(1 for d in docs if d.index_level == "metadata")
+        exact = self.access.exact_counts
+        # 정확한 전체 건수는 권한이 검증된 문서에만 의미가 있다. 실제 모드(exact=False)는 전체를 검증하지 않으므로
+        # 후보 기준 건수를 만들지 않고, 검증이 끝난 표시 결과에서만 센다.
+        meta_only = sum(1 for d in docs if d.index_level == "metadata") if exact else 0
         # 후보 추출: 질의 용어가 하나도 없는 조각은 점수에 기여하지 않으므로 SQL 로 미리 걸러낸다 (결과는 동일)
         name_norms = self.indexer.name_norms() if scope in ("all", "name") else {}
         cand: dict[str, list[Chunk]] = {}
-        if scope in ("all", "body"):
+        if scope in ("all", "body") and not self.body_blocked:
             cand = self.indexer.candidate_chunks(sorted({t for c in analysis.concepts for t, _ in c.variants}))
         hashes = self.indexer.content_hashes()
         scored = [r for r in (self._score_document(d, analysis, scope, name_norms.get(d.doc_id), cand.get(d.doc_id, []),
                                                    hashes.get(d.doc_id, "")) for d in docs) if r]
         scored = self._sort(scored, sort, descending)
+        if self.body_blocked and scope == "body":
+            scored = []
         total = len(scored)
         # 표시 직전 엄격 재검증: 삭제·권한 회수·공유 불가인 문서는 건너뛰고 다음 순위로 채운다
         final: list[SearchResult] = []
@@ -231,11 +246,14 @@ class SearchEngine:
                 rejected += 1
                 continue
             final.append(replace(r, stale=True, passages=[]) if self.access.is_stale(doc) else r)  # 과거 문단 비노출
+        if not exact:
+            total = len(final)
+            meta_only = sum(1 for r in final if r.index_level == "metadata")
         if not final:
             return SearchResponse(query, "no_results", "질문과 관련된 문서를 찾지 못했습니다.", analysis=analysis,
                                   unavailable_sources=unavailable, generation=generation,
-                                  metadata_only_count=meta_only, volatile=bool(rejected))
-        return SearchResponse(query, "ok", results=final, analysis=analysis, total_matched=total,
+                                  metadata_only_count=meta_only, volatile=bool(rejected), counts_exact=exact)
+        return SearchResponse(query, "ok", results=final, analysis=analysis, total_matched=total, counts_exact=exact,
                               unavailable_sources=unavailable, generation=generation, metadata_only_count=meta_only,
                               volatile=bool(rejected))
 
@@ -356,7 +374,7 @@ class SearchEngine:
         analysis = analyze_query(query, self.dictionary)
         if not analysis.concepts:
             return []
-        if self.access.is_stale(doc):
+        if self.body_blocked or self.access.is_stale(doc):
             return []
         scores = self._chunk_scores(self.indexer.get_chunks(doc_id), analysis, set())
         return sorted(((ch.seq, ch.loc, round(s, 2)) for s, ch, *_ in scores))
@@ -390,6 +408,8 @@ class SearchEngine:
         statuses = {s["source_key"]: s["status"] for s in self.indexer.source_statuses()}
         if statuses.get(doc.source_key) != "ok":
             return None
+        if self.body_blocked:
+            return doc, []
         if self.access.is_stale(doc):  # 원본이 색인 후 바뀜: 과거 본문(바뀌었거나 지워졌을 수 있음)은 보여주지 않는다
             return doc, []
         return doc, self.indexer.get_chunks(doc_id)

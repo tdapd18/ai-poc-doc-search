@@ -61,6 +61,8 @@ class AppConfig:
 
     @property
     def full_text(self) -> bool:
+        if getattr(self, "_storage_blocked", False):  # 저장 위치 보호를 확인하지 못함(런타임 한정, 설정 파일은 바꾸지 않는다)
+            return False
         return self.index_mode == "full_text" and self.approval.approved
 
 

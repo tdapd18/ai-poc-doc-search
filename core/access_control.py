@@ -34,6 +34,9 @@ class User:
 
 
 class AccessController:
+    # 전체 일치 건수를 권한 검증 없이 계산해도 되는가 (데모 ACL 은 신원 기반이라 정확함)
+    exact_counts = True
+
     def __init__(self, users: list[User], notice: str = ""):
         self._users = {u.user_id: u for u in users}
         self.notice = notice
@@ -84,6 +87,8 @@ class OSEnforcedAccessController(AccessController):
                         삭제·권한 회수·공유 불가·잠금·확인 불가는 모두 거부(fail-closed)한다.
     - ``is_stale``    : 색인 이후 파일이 바뀌었는지(크기·수정시각 지문 비교) — 권한 문제는 아니므로 표시만 한다.
     """
+
+    exact_counts = False  # 전체 파일을 열어 보지 않고는 정확한 건수를 알 수 없다 → 건수를 만들지 않는다
 
     def __init__(self, identity: WindowsIdentity, fs_for: Callable[[Document], FileSystem]):
         self.identity = identity

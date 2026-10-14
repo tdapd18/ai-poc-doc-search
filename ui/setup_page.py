@@ -10,7 +10,8 @@ import html
 
 from core.app_config import APPROVAL_STATEMENT, ConfigError
 from core.fs import FileSystem
-from core.services import Services, apply_index_mode, sync_with_audit
+from core.indexer import IndexResetError
+from core.services import Services, StorageBlockedError, apply_index_mode, perform_index_reset, sync_with_audit
 from core.setup_check import ConnectionTestResult, check_share
 from core.shares import ShareError
 from core.storage_security import find_residue, purge_residue, storage_warnings
@@ -74,6 +75,12 @@ def render_setup(st, svc: Services, ss) -> None:
     if ss.get("setup_flash"):
         kind, msg = ss.pop("setup_flash")
         getattr(st, kind)(msg)
+    for n in svc.notices or []:
+        st.warning(n)
+    storage = svc.storage
+    if storage is not None and storage.messages:
+        st.error("**로컬 색인 저장 위치 보호 확인 실패** — " + " ".join(storage.messages))
+        st.caption("앱은 회사 폴더 권한 정책을 변경하지 않습니다. 안전한 경로를 확보하면 앱을 다시 시작하세요. 원본 공유폴더 파일은 변경되지 않았습니다.")
 
     # ---------------------------------------------------------------- 1. 보안 모드
     st.markdown("### 1. 보안 모드 (색인 수준)")
@@ -82,6 +89,9 @@ def render_setup(st, svc: Services, ss) -> None:
     choice = st.radio("색인 수준", list(MODE_LABELS), format_func=MODE_LABELS.get, key="setup_mode_choice",
                       index=1 if cfg.full_text else 0)
     ack, approver = False, ""
+    if choice == "full_text" and storage is not None and not storage.allow_full_text:
+        st.error("로컬 색인 저장 위치가 안전하지 않아(또는 확인하지 못해) 본문 검색을 켤 수 없습니다.")
+        choice = "metadata_only"
     if choice == "full_text" and not cfg.full_text:
         st.warning("본문 검색은 회사 정보보안 승인을 받은 경우에만 사용하세요. 이 확인은 절차적 통제이며 승인 자체를 증명하지 않습니다.")
         ack = st.checkbox(APPROVAL_STATEMENT, key="setup_ack")
@@ -95,6 +105,8 @@ def render_setup(st, svc: Services, ss) -> None:
                 tests.clear()
             except ConfigError as exc:
                 _flash(ss, "error", str(exc))
+            except IndexResetError as exc:
+                _flash(ss, "error", f"{exc} 색인 수준은 변경됐지만 이전 색인을 삭제하지 못해 본문 표시를 차단했습니다. '색인 삭제'를 다시 시도하세요.")
             st.rerun()
         st.caption("※ 수준을 바꾸면 기존 색인(본문 포함)을 모두 삭제합니다.")
 
@@ -158,7 +170,10 @@ def render_setup(st, svc: Services, ss) -> None:
     level = "본문 검색(승인됨)" if cfg.full_text else "메타데이터 전용(내용 미열람)"
     st.markdown(f"색인 수준: **{level}** · 예상 대상 약 **{est}**개 파일" if ready else
                 "모든 사용 중인 공유의 연결 테스트가 성공해야 색인을 만들 수 있습니다.")
-    if st.button("색인 생성 시작", key="setup_run_index", disabled=not ready):
+    blocked = storage is not None and not storage.allow_index
+    if blocked:
+        st.error("로컬 색인 저장 위치를 안전하다고 확인하지 못해 색인 생성이 차단되었습니다. 위 안내를 확인하세요.")
+    if st.button("색인 생성 시작", key="setup_run_index", disabled=not ready or blocked):
         bar, status = st.progress(0.0), st.empty()
 
         def on_progress(ev: dict) -> None:
@@ -175,10 +190,10 @@ def render_setup(st, svc: Services, ss) -> None:
         with st.expander("최근 색인 결과", expanded=True):
             for line in ss["sync_report"].summary_lines():
                 st.text(line)
-    with st.expander("로컬 색인 저장 보안", expanded=bool(storage_warnings(store.home))):
+    with st.expander("로컬 색인 저장 보안", expanded=bool(storage_warnings(store.home, storage))):
         st.caption("색인 파일은 이 PC의 계정 전용 폴더에 저장되며, 임시 저널·정렬 임시파일을 디스크에 만들지 않고 삭제된 내용은 덮어씁니다. "
                    "BitLocker 같은 디스크 암호화는 별도로 적용하세요(앱이 DB 자체를 암호화하지는 않습니다).")
-        for w in storage_warnings(store.home):
+        for w in storage_warnings(store.home, storage):
             st.warning(w)
         res = find_residue(store.home)
         if res and st.button(f"백업·임시 잔존 파일 {len(res)}개 안전 삭제", key="setup_purge_residue"):
@@ -189,8 +204,12 @@ def render_setup(st, svc: Services, ss) -> None:
     with st.expander("색인 삭제 (이 PC에 저장된 색인을 모두 지웁니다)"):
         confirm = st.checkbox("로컬 색인(문서 목록·본문 포함)을 삭제하는 것을 확인합니다.", key="setup_del_confirm")
         if st.button("색인 삭제", key="setup_delete_index", disabled=not confirm):
-            svc.indexer.reset()
-            svc.engine.invalidate_cache()
-            store.audit("index_deleted")
-            _flash(ss, "success", "로컬 색인을 삭제했습니다.")
+            try:
+                perform_index_reset(svc)
+                svc.engine.invalidate_cache()
+                store.audit("index_deleted")
+                _flash(ss, "success", "로컬 색인을 삭제했습니다.")
+            except IndexResetError as exc:
+                store.audit("index_delete_failed")
+                _flash(ss, "error", f"{exc} 이전 본문이 남아 있을 수 있어 본문 표시를 차단했습니다. 다시 시도하세요.")
             st.rerun()

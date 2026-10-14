@@ -82,7 +82,8 @@ def test_metadata_only_search_by_name_path_and_body_notice(make_real, win):
     assert any(r.file_name == "깊은문서.txt" for r in in_folder.results)
     assert svc.engine.search(user, PHRASE, top_k=10).status == "no_results"
     body_only = svc.engine.search(user, "검증결과", scope="body")
-    assert body_only.status == "no_results" and body_only.metadata_only_count > 5
+    # 실제 모드는 권한 확인 전 후보 기준 건수(본문 미색인 문서 수)를 만들지 않는다 — 건수로 문서 존재를 추론할 수 없어야 한다
+    assert body_only.status == "no_results" and body_only.metadata_only_count == 0 and body_only.counts_exact is False
     r = by_name.results[0]
     assert r.index_level == "metadata" and r.passages == () and r.location == unc(win.rel["xlsx"])
 

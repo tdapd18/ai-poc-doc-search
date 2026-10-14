@@ -58,7 +58,13 @@ def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+class IndexResetError(RuntimeError):
+    """색인 삭제·초기화·복구에 실패했다 (이전 본문이 남아 있을 수 있음)."""
+
+
 class Indexer:
+    recovered = False  # 시작 시 손상된 색인 파일을 폐기하고 새로 만들었는가
+
     def __init__(self, db_path: Path | str, normalizer=None):
         self._normalizer = normalizer or (lambda t: t.lower())  # 검색 엔진이 ensure_normalization 으로 교체한다
         self.db_path = Path(db_path)
@@ -89,7 +95,9 @@ class Indexer:
         except sqlite3.DatabaseError:
             ok = False
         if not ok:
-            wipe_file(self.db_path)
+            if not wipe_file(self.db_path):
+                raise IndexResetError("손상된 색인 파일을 삭제하지 못했습니다.")
+            self.recovered = True
 
     @staticmethod
     def _migrate(c: sqlite3.Connection) -> None:
@@ -328,17 +336,25 @@ class Indexer:
         return False
 
     def reset(self) -> None:
-        """모든 문서·조각·저장소 상태를 삭제하고 파일을 정리(VACUUM)한다. 모드 전환·소유 계정 변경 시 사용."""
-        with self._conn() as c:
-            c.execute("DELETE FROM chunks")
-            c.execute("DELETE FROM documents")
-            c.execute("DELETE FROM source_status")
-            self._bump(c)
-        self.vacuum()
-        if self._memory_conn is None:  # 남은 저널/WAL 파일 정리
-            from core.storage_security import wipe_file
-            for suffix in ("-journal", "-wal", "-shm"):
-                wipe_file(self.db_path.with_name(self.db_path.name + suffix))
+        """모든 문서·조각·저장소 상태를 삭제하고 파일을 정리(VACUUM)한다. 모드 전환·소유 계정 변경 시 사용.
+        실패하면 IndexResetError — 호출자는 이전 본문이 남아 있을 수 있음을 사용자에게 알리고 본문 노출을 막아야 한다."""
+        try:
+            with self._conn() as c:
+                c.execute("DELETE FROM chunks")
+                c.execute("DELETE FROM documents")
+                c.execute("DELETE FROM source_status")
+                self._bump(c)
+            self.vacuum()
+            if self._memory_conn is None:  # 남은 저널/WAL 파일 정리
+                from core.storage_security import wipe_file
+                for suffix in ("-journal", "-wal", "-shm"):
+                    wipe_file(self.db_path.with_name(self.db_path.name + suffix))
+            if self.count_documents() != 0:
+                raise IndexResetError("색인 삭제 후에도 문서가 남아 있습니다.")
+        except IndexResetError:
+            raise
+        except (sqlite3.Error, OSError) as exc:
+            raise IndexResetError("색인을 삭제하지 못했습니다.") from exc
 
     def vacuum(self) -> None:
         if self._memory_conn is not None:

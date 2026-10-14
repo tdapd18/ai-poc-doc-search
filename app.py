@@ -21,7 +21,7 @@ from core.models import CATEGORIES, FILE_TYPE_SHORT, FILE_TYPES
 from core.presentation import (SOURCE_KIND, TYPE_KIND, badge_html, folder_of, make_snippet, path_html,
                                safe_highlight_html)
 from core.search_engine import SCOPES, SORTS, location_key
-from core.services import build_real_services, build_services, sync_with_audit
+from core.services import StorageBlockedError, build_real_services, build_services, sync_with_audit
 from ui.setup_page import render_setup
 from core.shares import ShareError
 
@@ -173,7 +173,8 @@ def run_search(query: str, record: bool = True, params: dict | None = None, mode
         if ans.mode == "ai" and ans.answer_text:
             text = ans.answer_text
         elif resp.status == "ok":
-            text = f"관련 문서 {resp.total_matched}건: " + ", ".join(r.title for r in resp.results)
+            text = (f"관련 문서 {resp.total_matched}건: " if resp.counts_exact else "접근 확인된 문서: ") \
+                + ", ".join(r.title for r in resp.results)
         else:
             text = "관련 문서를 찾지 못했습니다."
         sources = [(r.doc_id, r.title, r.content_hash) for r in resp.results]
@@ -216,7 +217,10 @@ def on_select(doc_id: str, seq: int | None = None) -> None:
 
 
 def on_sync() -> None:
-    ss.sync_report = sync_with_audit(svc) if REAL else svc.sync.sync()
+    try:
+        ss.sync_report = sync_with_audit(svc) if REAL else svc.sync.sync()
+    except StorageBlockedError as exc:
+        ss.flash = ("error", str(exc))
 
 
 def on_register(name: str, unc: str, local_dir: str) -> None:
@@ -382,6 +386,9 @@ with center:
             st.markdown('<div class="notice">🔒 <b>메타데이터 전용 모드</b>: 파일 이름·경로·형식·수정일만 검색합니다. '
                         "파일 내용은 읽지 않습니다. 본문 검색은 보안 승인 후 ‘초기 설정’에서 켤 수 있습니다.</div>",
                         unsafe_allow_html=True)
+        if svc.storage is not None and not svc.storage.allow_body:
+            st.error("로컬 색인 저장 위치의 보호를 확인하지 못해 **본문 검색·본문 표시가 차단**되었습니다 (파일명·경로만 검색). "
+                     "‘⚙ 초기 설정’의 안내를 확인하세요.")
         if svc.indexer.count_documents() == 0:
             st.warning("색인된 문서가 없습니다. ‘⚙ 초기 설정’에서 공유폴더를 등록하고 색인을 생성하세요.")
     else:
@@ -416,10 +423,11 @@ with center:
     last = ss.last
     if last and last["user_id"] != ss.user_id:
         last = ss.last = None
-    if last and last["generation"] != svc.indexer.get_generation():  # 색인/권한 변경 → 재검증(재검색)
+    # 세션에 남은 이전 응답은 그릴 때마다 현재 접근권한·삭제·수정 여부로 재검증한다 (색인 세대가 같아도 파일 상태는 바뀔 수 있다)
+    if last and (last["generation"] != svc.indexer.get_generation() or not svc.engine.revalidate_response(user, last["resp"])):
         run_search(last["query"], record=False, params=last["params"], mode=last["mode"])
         last = ss.last
-        st.info("색인 또는 접근권한이 갱신되어 검색 결과를 다시 계산했습니다.")
+        st.info("색인 또는 파일 접근 상태가 바뀌어 검색 결과를 다시 확인했습니다. 접근할 수 없는 문서는 표시되지 않습니다.")
 
     if last:
         resp, ans = last["resp"], last["ans"]
@@ -444,9 +452,14 @@ with center:
                 active.append(f"수정일 {ss.date_preset}")
             if ss.scope != "all":
                 active.append(SCOPE_LABELS[ss.scope])
+            if resp.counts_exact:
+                head = (f"**검색 결과 {resp.total_matched}건** (정렬: {SORT_LABELS[ss.sort]} {'↓' if ss.sort_desc else '↑'}"
+                        + (f", 상위 {len(resp.results)}건 표시" if resp.total_matched > len(resp.results) else "") + ")")
+            else:  # 실제 모드: 전체 일치 건수는 권한 확인 전이라 알리지 않고, 접근 확인이 끝난 표시 결과만 안내한다
+                head = (f"**접근 확인된 검색 결과 {len(resp.results)}건 표시** (정렬: {SORT_LABELS[ss.sort]} "
+                        f"{'↓' if ss.sort_desc else '↑'}, 접근 권한이 확인된 문서만 보여 줍니다)")
             st.markdown(
-                f"**검색 결과 {resp.total_matched}건** (정렬: {SORT_LABELS[ss.sort]} {'↓' if ss.sort_desc else '↑'}"
-                + (f", 상위 {len(resp.results)}건 표시" if resp.total_matched > len(resp.results) else "") + ")"
+                head
                 + ("<br>" + " ".join(f'<span class="chip">{html.escape(a)}</span>' for a in active) if active else ""),
                 unsafe_allow_html=True)
 
